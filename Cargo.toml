@@ -25,7 +25,7 @@ homepage = "https://github.com/memorysafety/sudo-rs"
 publish = true
 
 [workspace.dependencies]
-clap = "4.0.32"
+clap = "4.2.5"
 libc = "0.2.139"
 thiserror = "1.0.38"
 glob = "0.3.1"
