@@ -27,8 +27,11 @@ fn if_home_directory_does_not_exist_executes_program_without_changing_the_workin
 
         assert!(output.status().success());
 
+        let stderr = output.stderr();
         if sudo_test::is_original_sudo() {
-            assert_snapshot!(output.stderr());
+            assert_snapshot!(stderr);
+        } else {
+            assert_contains!(stderr, "unable to change directory");
         }
 
         let actual = output.stdout()?;
@@ -121,6 +124,26 @@ echo $@";
 }
 
 #[test]
+fn arguments_are_properly_distinguished() -> Result<()> {
+    let shell_path = "/tmp/my-shell";
+    let my_shell = "#!/bin/sh
+for arg in \"$@\"; do echo -n \"{$arg}\"; done";
+    let env = Env(SUDOERS_ALL_ALL_NOPASSWD)
+        .user(User(USERNAME).shell(shell_path))
+        .file(shell_path, TextFile(my_shell).chown(USERNAME).chmod("500"))
+        .build()?;
+
+    let output = Command::new("sudo")
+        .args(["-u", USERNAME, "-i", "a b", "c d"])
+        .exec(&env)?
+        .stdout()?;
+
+    assert_eq!("{-c}{a\\ b c\\ d}", output);
+
+    Ok(())
+}
+
+#[test]
 fn arguments_are_escaped_with_backslashes() -> Result<()> {
     let shell_path = "/tmp/my-shell";
     let my_shell = "#!/bin/sh
@@ -194,8 +217,11 @@ fn shell_does_not_exist() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(stderr, "IO error: No such file or directory");
     }
 
     Ok(())
@@ -216,8 +242,11 @@ fn insufficient_permissions_to_execute_shell() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(stderr, "IO error: Permission denied");
     }
 
     Ok(())

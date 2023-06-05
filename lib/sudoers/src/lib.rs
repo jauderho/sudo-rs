@@ -35,7 +35,7 @@ pub struct Request<'a, User: UnixUser, Group: UnixGroup> {
     pub user: &'a User,
     pub group: &'a Group,
     pub command: &'a Path,
-    pub arguments: &'a str,
+    pub arguments: &'a [String],
 }
 
 #[derive(Default)]
@@ -129,8 +129,6 @@ fn check_permission<User: UnixUser + PartialEq<User>, Group: UnixGroup>(
     let runas_user_aliases = get_aliases(&aliases.runas, &match_user(request.user));
     let runas_group_aliases = get_aliases(&aliases.runas, &match_group_alias(request.group));
 
-    let mut sha2_eq = check_all_sha2(request.command);
-
     let allowed_commands = rules
         .iter()
         .filter_map(|sudo| {
@@ -157,8 +155,7 @@ fn check_permission<User: UnixUser + PartialEq<User>, Group: UnixGroup>(
             }
 
             Some(cmdspec)
-        })
-        .filter(|(_, _, Sha2(hex))| hex.is_empty() || sha2_eq(hex));
+        });
 
     find_item(allowed_commands, &match_command(cmdline), &cmnd_aliases)
 }
@@ -169,16 +166,16 @@ fn check_permission<User: UnixUser + PartialEq<User>, Group: UnixGroup>(
 
 fn distribute_tags(
     runas_cmds: &[(Option<RunAs>, CommandSpec)],
-) -> impl Iterator<Item = (Option<&RunAs>, (Tag, &Spec<Command>, &Sha2))> {
+) -> impl Iterator<Item = (Option<&RunAs>, (Tag, &Spec<Command>))> {
     runas_cmds.iter().scan(
         (None, Default::default()),
-        |(mut last_runas, tag), (runas, CommandSpec(mods, cmd, digest))| {
+        |(mut last_runas, tag), (runas, CommandSpec(mods, cmd))| {
             last_runas = runas.as_ref().or(last_runas);
             for f in mods {
                 f(tag);
             }
 
-            Some((last_runas, (tag.clone(), cmd, digest)))
+            Some((last_runas, (tag.clone(), cmd)))
         },
     )
 }
@@ -234,7 +231,7 @@ impl<'a, T> WithInfo for &'a Spec<T> {
 }
 
 /// A commandspec can be "tagged"
-impl<'a, T> WithInfo for (Tag, &'a Spec<Command>, &'a T) {
+impl<'a> WithInfo for (Tag, &'a Spec<Command>) {
     type Item = &'a Spec<Command>;
     type Info = Tag;
     fn to_inner(self) -> &'a Spec<Command> {
@@ -284,8 +281,10 @@ fn match_token<T: basic_parser::Token + std::ops::Deref<Target = String>>(
     move |token| token.as_str() == text
 }
 
-fn match_command<'a>((cmd, args): (&'a Path, &'a str)) -> (impl Fn(&Command) -> bool + 'a) {
-    move |(cmdpat, argpat)| cmdpat.matches_path(cmd) && argpat.matches(args)
+fn match_command<'a>((cmd, args): (&'a Path, &'a [String])) -> (impl Fn(&Command) -> bool + 'a) {
+    move |(cmdpat, argpat)| {
+        cmdpat.matches_path(cmd) && argpat.as_ref().map_or(true, |vec| args == vec.as_ref())
+    }
 }
 
 /// Find all the aliases that a object is a member of; this requires [sanitize_alias_table] to have run first;
@@ -376,7 +375,7 @@ fn analyze(sudoers: impl IntoIterator<Item = basic_parser::Parsed<Sudo>>) -> (Su
             if *count >= INCLUDE_LIMIT {
                 diagnostics.push(Error(
                     None,
-                    format!("include file limit reached opening `{}'", path.display()),
+                    format!("include file limit reached opening '{}'", path.display()),
                 ))
             } else if let Ok(subsudoer) = read_sudoers(path) {
                 *count += 1;
@@ -384,7 +383,7 @@ fn analyze(sudoers: impl IntoIterator<Item = basic_parser::Parsed<Sudo>>) -> (Su
             } else {
                 diagnostics.push(Error(
                     None,
-                    format!("cannot open sudoers file `{}'", path.display()),
+                    format!("cannot open sudoers file '{}'", path.display()),
                 ))
             }
         }
@@ -525,7 +524,7 @@ fn sanitize_alias_table<T>(table: &Vec<Def<T>>, diagnostics: &mut Vec<Error>) ->
                 for elem in members {
                     let Meta::Alias(name) = remqualify(elem) else { break };
                     let Some(dependency) = self.table.iter().position(|Def(id,_)| id==name) else {
-                        self.complain(format!("undefined alias: `{name}'"));
+                        self.complain(format!("undefined alias: '{name}'"));
                         continue;
                     };
                     self.visit(dependency);
@@ -533,7 +532,7 @@ fn sanitize_alias_table<T>(table: &Vec<Def<T>>, diagnostics: &mut Vec<Error>) ->
                 self.order.push(pos);
             } else if !self.order.contains(&pos) {
                 let Def(id, _) = &self.table[pos];
-                self.complain(format!("recursive alias: `{id}'"));
+                self.complain(format!("recursive alias: '{id}'"));
             }
         }
     }
@@ -548,26 +547,13 @@ fn sanitize_alias_table<T>(table: &Vec<Def<T>>, diagnostics: &mut Vec<Error>) ->
     let mut dupe = HashSet::new();
     for (i, Def(name, _)) in table.iter().enumerate() {
         if !dupe.insert(name) {
-            visitor.complain(format!("multiple occurences of `{name}'"));
+            visitor.complain(format!("multiple occurrences of '{name}'"));
         } else {
             visitor.visit(i);
         }
     }
 
     visitor.order
-}
-
-mod compute_hash;
-
-fn check_all_sha2(binary: &Path) -> impl FnMut(&Box<[u8]>) -> bool + '_ {
-    use compute_hash::sha2;
-
-    let mut memo = std::collections::HashMap::new(); // pun not intended
-
-    move |bytes| {
-        let bits = 8 * bytes.len() as u16;
-        memo.entry(bits).or_insert_with(|| sha2(bits, binary)) == bytes
-    }
 }
 
 #[cfg(test)]

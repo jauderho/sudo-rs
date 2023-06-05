@@ -1,71 +1,16 @@
 #![forbid(unsafe_code)]
 
-use pam::authenticate;
+use pam::{determine_record_scope, PamAuthenticator};
+use pipeline::{Pipeline, PolicyPlugin};
 use std::env;
-use sudo_cli::SudoOptions;
-use sudo_common::{Context, Error};
-use sudo_env::environment;
-use sudoers::{Authorization, DirChange, Judgement, Policy, PreJudgementPolicy, Sudoers};
+use sudo_cli::{help, SudoAction, SudoOptions};
+use sudo_common::{resolve::resolve_current_user, Context, Error};
+use sudo_system::{time::Duration, timestamp::SessionRecordFile, Process};
 
 mod diagnostic;
 use diagnostic::diagnostic;
 mod pam;
-
-fn parse_sudoers() -> Result<Sudoers, Error> {
-    // TODO: move to global configuration
-    let sudoers_path = "/etc/sudoers.test";
-
-    let (sudoers, syntax_errors) =
-        Sudoers::new(sudoers_path).map_err(|e| Error::Configuration(format!("{e}")))?;
-
-    for sudoers::Error(pos, error) in syntax_errors {
-        diagnostic!("{error}", sudoers_path @ pos);
-    }
-
-    Ok(sudoers)
-}
-
-/// parse suoers file and check permission to run the provided command given the context
-fn check_sudoers(sudoers: &Sudoers, context: &Context) -> sudoers::Judgement {
-    sudoers.check(
-        &context.current_user,
-        &context.hostname,
-        sudoers::Request {
-            user: &context.target_user,
-            group: &context.target_group,
-            command: &context.command.command,
-            arguments: &context.command.arguments.join(" "),
-        },
-    )
-}
-
-/// Resolve the path to use and build a context object from the options
-fn build_context(
-    sudo_options: SudoOptions,
-    sudoers: &impl PreJudgementPolicy,
-) -> Result<Context, Error> {
-    let env_path = env::var("PATH").unwrap_or_default();
-    let path = sudoers.secure_path().unwrap_or(env_path);
-
-    Context::build_from_options(sudo_options, path)
-}
-
-/// Change context values given a policy
-fn apply_policy_to_context(context: &mut Context, policy: &Judgement) -> Result<(), Error> {
-    // see if the chdir flag is permitted
-    match policy.chdir() {
-        DirChange::Any => {}
-        DirChange::Strict(optdir) => {
-            if context.chdir.is_some() {
-                return Err(Error::auth("no permission")); // TODO better user error messages
-            } else {
-                context.chdir = optdir.map(std::path::PathBuf::from)
-            }
-        }
-    }
-
-    Ok(())
-}
+mod pipeline;
 
 /// show warning message when SUDO_RS_IS_UNSTABLE is not set to the appropriate value
 fn unstable_warning() {
@@ -85,57 +30,113 @@ do this then this software is not suited for you at this time."
     }
 }
 
-fn sudo_process() -> Result<std::process::ExitStatus, Error> {
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Default)]
+pub struct SudoersPolicy;
+
+impl PolicyPlugin for SudoersPolicy {
+    type PreJudgementPolicy = sudoers::Sudoers;
+    type Policy = sudoers::Judgement;
+
+    fn init(&mut self) -> Result<Self::PreJudgementPolicy, Error> {
+        // TODO: move to global configuration
+        let sudoers_path = "/etc/sudoers.test";
+
+        let (sudoers, syntax_errors) = sudoers::Sudoers::new(sudoers_path)
+            .map_err(|e| Error::Configuration(format!("{e}")))?;
+
+        for sudoers::Error(pos, error) in syntax_errors {
+            diagnostic!("{error}", sudoers_path @ pos);
+        }
+
+        Ok(sudoers)
+    }
+
+    fn judge(
+        &mut self,
+        pre: Self::PreJudgementPolicy,
+        context: &Context,
+    ) -> Result<Self::Policy, Error> {
+        Ok(pre.check(
+            &context.current_user,
+            &context.hostname,
+            sudoers::Request {
+                user: &context.target_user,
+                group: &context.target_group,
+                command: &context.command.command,
+                arguments: &context.command.arguments,
+            },
+        ))
+    }
+}
+
+fn sudo_process() -> Result<(), Error> {
     sudo_log::SudoLogger::new().into_global_logger();
 
     // parse cli options
-    let sudo_options = SudoOptions::parse();
-
-    unstable_warning();
-
-    // parse sudoers file
-    let sudoers = parse_sudoers()?;
-
-    // build context given a path
-    let mut context = build_context(sudo_options, &sudoers)?;
-
-    // check sudoers file for permission
-    let policy = check_sudoers(&sudoers, &context);
-
-    // see if user must be authenticated
-    match policy.authorization() {
-        Authorization::Required => {
-            // authenticate user using pam
-            authenticate(&context)?;
-        }
-        Authorization::Passed => {}
-        Authorization::Forbidden => {
-            return Err(Error::auth(&format!(
-                "i'm sorry {}, i'm afraid i can't do that",
-                context.current_user.name
-            )));
+    let sudo_options = match SudoOptions::from_env() {
+        Ok(options) => match options.action {
+            SudoAction::Help => {
+                eprintln!("{}", help::HELP_MSG);
+                std::process::exit(0);
+            }
+            SudoAction::Version => {
+                eprintln!("sudo-rs {VERSION}");
+                std::process::exit(0);
+            }
+            SudoAction::RemoveTimestamp => {
+                let user = resolve_current_user()?;
+                let mut record_file =
+                    SessionRecordFile::open_for_user(&user.name, Duration::seconds(0))?;
+                record_file.reset()?;
+                return Ok(());
+            }
+            SudoAction::ResetTimestamp => {
+                if let Some(scope) = determine_record_scope(&Process::new()) {
+                    let user = resolve_current_user()?;
+                    let mut record_file =
+                        SessionRecordFile::open_for_user(&user.name, Duration::seconds(0))?;
+                    record_file.disable(scope, None)?;
+                }
+                return Ok(());
+            }
+            SudoAction::Validate => {
+                unimplemented!();
+            }
+            SudoAction::Run(ref cmd) => {
+                if cmd.is_empty() && !options.shell && !options.login {
+                    eprintln!("{}", help::USAGE_MSG);
+                    std::process::exit(1);
+                } else {
+                    options
+                }
+            }
+            SudoAction::List(_) => {
+                unimplemented!();
+            }
+            SudoAction::Edit(_) => {
+                unimplemented!();
+            }
+        },
+        Err(e) => {
+            eprintln!("{e}\n{}", help::USAGE_MSG);
+            std::process::exit(1);
         }
     };
 
-    apply_policy_to_context(&mut context, &policy)?;
+    unstable_warning();
 
-    // build environment
-    let current_env = std::env::vars_os().collect();
-    let target_env = environment::get_target_environment(current_env, &context, &policy);
-
-    // run command and return corresponding exit code
-    Ok(sudo_exec::run_command(context, target_env)?)
+    let mut pipeline = Pipeline {
+        policy: SudoersPolicy::default(),
+        authenticator: PamAuthenticator::new_cli(),
+    };
+    pipeline.run(sudo_options)
 }
 
 fn main() {
     match sudo_process() {
-        Ok(status) => {
-            if let Some(code) = status.code() {
-                std::process::exit(code);
-            } else {
-                std::process::exit(1);
-            }
-        }
+        Ok(()) => (),
         Err(error) => {
             diagnostic!("{error}");
             std::process::exit(1);

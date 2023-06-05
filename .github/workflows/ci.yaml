@@ -39,6 +39,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
+          shared-key: 'compliance-tests'
           workspaces: |
             test-framework
 
@@ -63,12 +64,39 @@ jobs:
         run: |
           tmpfile="$(mktemp)"
           cargo test -p sudo-compliance-tests -- --ignored | tee "$tmpfile"
-          grep 'test result: FAILED. 0 passed' "$tmpfile" || exit 1
+          grep 'test result: FAILED. 0 passed' "$tmpfile" || ( echo "expected ALL tests to fail but at least one passed; the passing tests must be un-#[ignore]-d" && exit 1 )
 
       - name: prevent the cache from growing too large
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  clippy-compliance-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: 'compliance-tests'
+          workspaces: |
+            test-framework
+
+      - name: clippy sudo-test
+        working-directory: test-framework
+        run: cargo clippy -p sudo-test --no-deps -- --deny clippy::all
+
+      - name: clippy compliance-tests
+        working-directory: test-framework
+        run: cargo clippy -p sudo-compliance-tests --tests --no-deps -- --deny clippy::all
 
   build-and-test:
     runs-on: ubuntu-latest
@@ -97,7 +125,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "stable"
+          shared-key: 'stable'
 
       - name: Build
         uses: actions-rs/cargo@v1
@@ -143,7 +171,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "miri"
+          shared-key: miri
 
       - name: Run tests
         uses: actions-rs/cargo@v1
@@ -169,7 +197,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "nightly"
+          shared-key: nightly
 
       - name: Run rustfmt
         uses: actions-rs/cargo@v1
@@ -202,7 +230,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "nightly"
+          shared-key: nightly
 
       - name: Run clippy
         uses: actions-rs/clippy-check@v1
@@ -235,7 +263,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "nightly"
+          shared-key: nightly
 
       - name: Build docs
         uses: actions-rs/cargo@v1
@@ -243,55 +271,73 @@ jobs:
           command: doc
           args: --no-deps --document-private-items --all-features
 
-  unused-dependencies:
+  track-dependencies:
     needs: clippy
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v2
+
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
+
       - name: Install cargo-udeps
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-udeps
+
       - name: Install dependencies
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: libpam0g-dev
           version: 1.0
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "udeps"
+          shared-key: deps
+
       - name: Check udeps
         uses: actions-rs/cargo@v1
         with:
           command: udeps
           args: --workspace --all-targets
 
+      - uses: tweedegolf/cargo-dependencies-action@v0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          mainBranchName: main
+
   audit:
     needs: clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
+
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "audit"
+          shared-key: 'audit'
+
       - name: Run audit
         uses: actions-rs/cargo@v1
         with:

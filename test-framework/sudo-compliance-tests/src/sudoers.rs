@@ -3,10 +3,14 @@ use sudo_test::{Command, Env, TextFile, User};
 use crate::{Result, PASSWORD, SUDOERS_ROOT_ALL_NOPASSWD, USERNAME};
 
 mod cmnd;
+mod cwd;
+mod env;
 mod host_list;
 mod run_as;
 mod secure_path;
 mod user_list;
+mod host_alias;
+mod cmnd_alias;
 
 #[test]
 fn cannot_sudo_if_sudoers_file_is_world_writable() -> Result<()> {
@@ -15,9 +19,12 @@ fn cannot_sudo_if_sudoers_file_is_world_writable() -> Result<()> {
     let output = Command::new("sudo").arg("true").exec(&env)?;
     assert_eq!(Some(1), output.status().code());
 
-    if sudo_test::is_original_sudo() {
-        assert_contains!(output.stderr(), "/etc/sudoers is world writable");
-    }
+    let diagnostic = if sudo_test::is_original_sudo() {
+        "/etc/sudoers is world writable"
+    } else {
+        "invalid configuration: /etc/sudoers.test cannot be world-writable"
+    };
+    assert_contains!(output.stderr(), diagnostic);
 
     Ok(())
 }
@@ -33,12 +40,12 @@ fn cannot_sudo_if_sudoers_file_is_group_writable() -> Result<()> {
     let output = Command::new("sudo").arg("true").exec(&env)?;
     assert_eq!(Some(1), output.status().code());
 
-    if sudo_test::is_original_sudo() {
-        assert_contains!(
-            output.stderr(),
-            "/etc/sudoers is owned by gid 1234, should be 0"
-        );
-    }
+    let diagnostic = if sudo_test::is_original_sudo() {
+        "/etc/sudoers is owned by gid 1234, should be 0"
+    } else {
+        "invalid configuration: /etc/sudoers.test cannot be group-writable"
+    };
+    assert_contains!(output.stderr(), diagnostic);
 
     Ok(())
 }
@@ -62,12 +69,12 @@ fn cannot_sudo_if_sudoers_file_is_not_owned_by_root() -> Result<()> {
     let output = Command::new("sudo").arg("true").exec(&env)?;
     assert_eq!(Some(1), output.status().code());
 
-    if sudo_test::is_original_sudo() {
-        assert_contains!(
-            output.stderr(),
-            "/etc/sudoers is owned by uid 1234, should be 0"
-        );
-    }
+    let diagnostic = if sudo_test::is_original_sudo() {
+        "/etc/sudoers is owned by uid 1234, should be 0"
+    } else {
+        "invalid configuration: /etc/sudoers.test must be owned by root"
+    };
+    assert_contains!(output.stderr(), diagnostic);
 
     Ok(())
 }
@@ -88,9 +95,12 @@ fn user_specifications_evaluated_bottom_to_top() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
-    if sudo_test::is_original_sudo() {
-        assert_contains!(output.stderr(), "no password was provided");
-    }
+    let diagnostic = if sudo_test::is_original_sudo() {
+        "no password was provided"
+    } else {
+        "incorrect authentication attempt"
+    };
+    assert_contains!(output.stderr(), diagnostic);
 
     Command::new("sudo")
         .args(["-S", "true"])

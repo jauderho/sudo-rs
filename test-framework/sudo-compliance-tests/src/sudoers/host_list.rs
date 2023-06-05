@@ -1,6 +1,6 @@
 use sudo_test::{Command, Env};
 
-use crate::Result;
+use crate::{Result, LONGEST_HOSTNAME};
 
 macro_rules! assert_snapshot {
     ($($tt:tt)*) => {
@@ -37,8 +37,14 @@ fn given_specific_hostname_then_sudo_from_different_hostname_is_rejected() -> Re
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
     }
 
     Ok(())
@@ -79,8 +85,14 @@ fn negation_rejects() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
     }
 
     Ok(())
@@ -90,6 +102,18 @@ fn negation_rejects() -> Result<()> {
 fn double_negative_is_positive() -> Result<()> {
     let env = Env("ALL !!container = (ALL:ALL) ALL")
         .hostname("container")
+        .build()?;
+
+    Command::new("sudo")
+        .arg("true")
+        .exec(&env)?
+        .assert_success()
+}
+
+#[test]
+fn longest_hostname() -> Result<()> {
+    let env = Env(format!("ALL {LONGEST_HOSTNAME} = (ALL:ALL) ALL"))
+        .hostname(LONGEST_HOSTNAME)
         .build()?;
 
     Command::new("sudo")

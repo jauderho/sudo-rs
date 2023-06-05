@@ -100,6 +100,26 @@ echo $@";
 }
 
 #[test]
+fn arguments_are_properly_distinguished() -> Result<()> {
+    let shell_path = "/root/my-shell";
+    let my_shell = "#!/bin/sh
+for arg in \"$@\"; do echo -n \"{$arg}\"; done";
+    let env = Env(SUDOERS_ALL_ALL_NOPASSWD)
+        .file(shell_path, TextFile(my_shell).chmod("100"))
+        .build()?;
+
+    let output = Command::new("env")
+        .arg(format!("SHELL={shell_path}"))
+        .args(["sudo", "-s", "a b", "c d"])
+        .exec(&env)?
+        .stdout()?;
+
+    assert_eq!("{-c}{a\\ b c\\ d}", output);
+
+    Ok(())
+}
+
+#[test]
 fn arguments_are_escaped_with_backslashes() -> Result<()> {
     let shell_path = "/root/my-shell";
     let my_shell = "#!/bin/sh
@@ -168,8 +188,11 @@ fn shell_does_not_exist() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(stderr, "IO error: No such file or directory");
     }
 
     Ok(())
@@ -190,8 +213,11 @@ fn shell_is_not_executable() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
+    let stderr = output.stderr();
     if sudo_test::is_original_sudo() {
-        assert_snapshot!(output.stderr());
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(stderr, "IO error: Permission denied");
     }
 
     Ok(())

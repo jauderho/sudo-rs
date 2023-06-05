@@ -20,13 +20,14 @@ pub trait Policy {
 
     fn env_keep(&self) -> &HashSet<String>;
     fn env_check(&self) -> &HashSet<String>;
+
+    fn secure_path(&self) -> Option<String>;
 }
 
 #[must_use]
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum Authorization {
-    Required,
-    Passed,
+    Allowed { must_authenticate: bool },
     Forbidden,
 }
 
@@ -40,10 +41,8 @@ pub enum DirChange<'a> {
 impl Policy for Judgement {
     fn authorization(&self) -> Authorization {
         if let Some(tag) = &self.flags {
-            if !tag.passwd {
-                Authorization::Passed
-            } else {
-                Authorization::Required
+            Authorization::Allowed {
+                must_authenticate: tag.passwd,
             }
         } else {
             Authorization::Forbidden
@@ -64,6 +63,12 @@ impl Policy for Judgement {
             Some(super::ChDir::Any) => DirChange::Any,
             Some(super::ChDir::Path(path)) => DirChange::Strict(Some(path)),
         }
+    }
+
+    fn secure_path(&self) -> Option<String> {
+        self.settings.str_value["secure_path"]
+            .as_ref()
+            .map(|s| s.to_string())
     }
 }
 
@@ -98,9 +103,19 @@ mod test {
         let mut judge: Judgement = Default::default();
         assert_eq!(judge.authorization(), Authorization::Forbidden);
         judge.mod_flag(|tag| tag.passwd = true);
-        assert_eq!(judge.authorization(), Authorization::Required);
+        assert_eq!(
+            judge.authorization(),
+            Authorization::Allowed {
+                must_authenticate: true
+            }
+        );
         judge.mod_flag(|tag| tag.passwd = false);
-        assert_eq!(judge.authorization(), Authorization::Passed);
+        assert_eq!(
+            judge.authorization(),
+            Authorization::Allowed {
+                must_authenticate: false
+            }
+        );
     }
 
     #[test]

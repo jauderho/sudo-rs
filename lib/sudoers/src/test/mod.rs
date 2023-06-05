@@ -83,56 +83,14 @@ fn ambiguous_spec() {
 }
 
 #[test]
-fn digest_spec() {
-    let CommandSpec(_, _, digest) = parse_eval(
-        "NOPASSWD: sha224: c12053ca894181bc137b940b06b2e2459e9aa7b46d2d317777f34236 /bin/ls",
-    );
-    let Sha2(vec) = digest;
-    assert_eq!(
-        *vec,
-        [
-            0xc1, 0x20, 0x53, 0xca, 0x89, 0x41, 0x81, 0xbc, 0x13, 0x7b, 0x94, 0x0b, 0x06, 0xb2,
-            0xe2, 0x45, 0x9e, 0x9a, 0xa7, 0xb4, 0x6d, 0x2d, 0x31, 0x77, 0x77, 0xf3, 0x42, 0x36,
-        ]
-    )
-}
-
-#[test]
-#[should_panic]
-fn digest_spec_fail1() {
-    // the hash length is incorrect
-    parse_eval::<CommandSpec>(
-        "NOPASSWD: sha224: c12053ca894181bc137b940b06b2e2459e9aa7b46d2d317777f342 /bin/ls",
-    );
-}
-
-#[test]
-#[should_panic]
-fn digest_spec_fail2() {
-    // the hash length has an odd length
-    parse_eval::<CommandSpec>(
-        "NOPASSWD: sha224: c12053ca894181bc137b940b06b2e2459e9aa7b46d2d317777f3421 /bin/ls",
-    );
-}
-
-#[test]
-#[should_panic]
-fn digest_spec_fail3() {
-    // the hash length has an invalid char
-    parse_eval::<CommandSpec>(
-        "NOPASSWD: sha224: c12053ca894181bc137b940b06b2e2459e9aa7b46d2d317777g34236 /bin/ls",
-    );
-}
-
-#[test]
 fn permission_test() {
     let root = || (&Named("root"), &Named("root"));
 
     macro_rules! FAIL {
         ([$($sudo:expr),*], $user:expr => $req:expr, $server:expr; $command:expr) => {
             let (Sudoers { rules,aliases,settings }, _) = analyze(sudoer![$($sudo),*]);
-            let cmdvec = $command.split_whitespace().collect::<Vec<_>>();
-            let req = Request { user: $req.0, group: $req.1, command: cmdvec[0].as_ref(), arguments: &cmdvec[1..].join(" ") };
+            let cmdvec = $command.split_whitespace().map(String::from).collect::<Vec<_>>();
+            let req = Request { user: $req.0, group: $req.1, command: cmdvec[0].as_ref(), arguments: &cmdvec[1..].to_vec() };
             assert_eq!(Sudoers { rules, aliases, settings }.check(&Named($user), $server, req).flags, None);
         }
     }
@@ -140,8 +98,8 @@ fn permission_test() {
     macro_rules! pass {
         ([$($sudo:expr),*], $user:expr => $req:expr, $server:expr; $command:expr $(=> [$($key:ident : $val:expr),*])?) => {
             let (Sudoers { rules,aliases,settings }, _) = analyze(sudoer![$($sudo),*]);
-            let cmdvec = $command.split_whitespace().collect::<Vec<_>>();
-            let req = Request { user: $req.0, group: $req.1, command: &cmdvec[0].as_ref(), arguments: &cmdvec[1..].join(" ") };
+            let cmdvec = $command.split_whitespace().map(String::from).collect::<Vec<_>>();
+            let req = Request { user: $req.0, group: $req.1, command: &cmdvec[0].as_ref(), arguments: &cmdvec[1..].to_vec() };
             let result = Sudoers { rules, aliases, settings }.check(&Named($user), $server, req).flags;
             assert!(!result.is_none());
             $(
@@ -195,15 +153,16 @@ fn permission_test() {
     pass!(["user ALL=/bin/hello  arg"], "user" => root(), "server"; "/bin/hello arg");
     pass!(["user ALL=/bin/hello arg"], "user" => root(), "server"; "/bin/hello  arg");
     FAIL!(["user ALL=/bin/hello arg"], "user" => root(), "server"; "/bin/hello boo");
-    pass!(["user ALL=/bin/hello a*g"], "user" => root(), "server"; "/bin/hello  aaaarg");
-    FAIL!(["user ALL=/bin/hello a*g"], "user" => root(), "server"; "/bin/hello boo");
+    // several test cases with globbing in the arguments are explicitly not supported by sudo-rs
+    //pass!(["user ALL=/bin/hello a*g"], "user" => root(), "server"; "/bin/hello  aaaarg");
+    //FAIL!(["user ALL=/bin/hello a*g"], "user" => root(), "server"; "/bin/hello boo");
     pass!(["user ALL=/bin/hello"], "user" => root(), "server"; "/bin/hello boo");
     FAIL!(["user ALL=/bin/hello \"\""], "user" => root(), "server"; "/bin/hello boo");
     pass!(["user ALL=/bin/hello \"\""], "user" => root(), "server"; "/bin/hello");
     pass!(["user ALL=/bin/hel*"], "user" => root(), "server"; "/bin/hello");
     pass!(["user ALL=/bin/hel*"], "user" => root(), "server"; "/bin/help");
     pass!(["user ALL=/bin/hel*"], "user" => root(), "server"; "/bin/help me");
-    pass!(["user ALL=/bin/hel* *"], "user" => root(), "server"; "/bin/help");
+    //pass!(["user ALL=/bin/hel* *"], "user" => root(), "server"; "/bin/help");
     FAIL!(["user ALL=/bin/hel* me"], "user" => root(), "server"; "/bin/help");
     pass!(["user ALL=/bin/hel* me"], "user" => root(), "server"; "/bin/help me");
     FAIL!(["user ALL=/bin/hel* me"], "user" => root(), "server"; "/bin/help me please");

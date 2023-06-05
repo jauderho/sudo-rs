@@ -85,16 +85,12 @@ mod names {
         const DESCRIPTION: &'static str = "environment variable";
     }
 
-    impl UserFriendly for tokens::Sha2 {
-        const DESCRIPTION: &'static str = "digest";
-    }
-
     impl UserFriendly for CommandSpec {
         const DESCRIPTION: &'static str = tokens::Command::DESCRIPTION;
     }
 
     impl UserFriendly for tokens::ChDir {
-        const DESCRIPTION: &'static str = "directory or `*'";
+        const DESCRIPTION: &'static str = "directory or '*'";
     }
 
     impl UserFriendly for (String, ConfigValue) {

@@ -1,41 +1,73 @@
-use std::ffi::NulError;
+use std::{ffi::NulError, fmt};
 
 use sudo_pam_sys::*;
-use thiserror::Error;
 
 pub type PamResult<T, E = PamError> = Result<T, E>;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum PamErrorType {
+    /// There was no error running the PAM command
     Success,
+    ///
     OpenError,
+    ///
     SymbolError,
+    ///
     ServiceError,
+    ///
     SystemError,
+    ///
     BufferError,
+    ///
     ConversationError,
+    ///
     PermissionDenied,
+    /// The maximum number of authentication attempts was reached and no more
+    /// attempts should be made.
     MaxTries,
+    /// The user failed to authenticate correctly.
     AuthError,
     NewAuthTokenRequired,
+    /// The application does not have enough credentials to authenticate the
+    /// user. This can for example happen if we wanted to update the user
+    /// password from a non-root process, which we cannot do.
     CredentialsInsufficient,
+    /// PAM modules were unable to access the authentication information (for
+    /// example due to a network error).
     AuthInfoUnavailable,
+    /// The specified user is unknown to an authentication service.
     UserUnknown,
+    /// Failed to retrieve the credentials (i.e. password) for a user.
     CredentialsUnavailable,
+    /// The credentials (i.e. password) for this user were expired.
     CredentialsExpired,
+    /// There was an error setting the user credentials.
     CredentialsError,
+    /// The user account is expired and can no longer be used.
     AccountExpired,
+    ///
     AuthTokenExpired,
+    ///
     SessionError,
+    ///
     AuthTokenError,
+    ///
     AuthTokenRecoveryError,
+    ///
     AuthTokenLockBusy,
+    ///
     AuthTokenDisableAging,
+    ///
     NoModuleData,
+    ///
     Ignore,
+    /// The application should exit immediately.
     Abort,
+    ///
     TryAgain,
+    ///
     ModuleUnknown,
+    /// The application tried to set/delete an undefined or inaccessible item.
     BadItem, // Extension in OpenPAM and LinuxPAM
     // DomainUnknown, // OpenPAM only
     // BadHandle // OpenPAM only
@@ -135,9 +167,11 @@ impl PamErrorType {
         }
     }
 
-    fn get_err_msg(&self, handle: *const pam_handle_t) -> String {
-        // TODO: check if handle is fine being a const ptr and the cast here is for the typechecker only
-        let data = unsafe { pam_strerror(handle as *mut _, self.as_int()) };
+    fn get_err_msg(&self) -> String {
+        // pam_strerror technically takes a pam handle as the first argument,
+        // but we do not know of any implementation that actually uses the pamh
+        // argument. See also the netbsd man page for `pam_strerror`.
+        let data = unsafe { pam_strerror(std::ptr::null_mut(), self.as_int()) };
         if data.is_null() {
             String::from("Error unresolved by PAM")
         } else {
@@ -146,38 +180,71 @@ impl PamErrorType {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum PamError {
-    #[error("Unexpected nul byte in input")]
-    UnexpectedNulByte(#[from] NulError),
-    #[error("Could not initiate pam because the state is not complete")]
+    UnexpectedNulByte(NulError),
     InvalidState,
-    #[error("PAM returned an error ({0:?}): {1}")]
     Pam(PamErrorType, String),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("Cannot open session while one is already open")]
+    IoError(std::io::Error),
     SessionAlreadyOpen,
-    #[error("Cannot close session while none is open")]
     SessionNotOpen,
+    EnvListFailure,
+}
+
+impl From<std::io::Error> for PamError {
+    fn from(err: std::io::Error) -> Self {
+        PamError::IoError(err)
+    }
+}
+
+impl From<NulError> for PamError {
+    fn from(err: NulError) -> Self {
+        PamError::UnexpectedNulByte(err)
+    }
+}
+
+impl fmt::Display for PamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PamError::UnexpectedNulByte(_) => write!(f, "Unexpected nul byte in input"),
+            PamError::InvalidState => {
+                write!(
+                    f,
+                    "Could not initiate pam because the state is not complete"
+                )
+            }
+            PamError::Pam(tp, msg) => write!(f, "PAM returned an error ({tp:?}): {msg}"),
+            PamError::IoError(e) => write!(f, "IO error: {e}"),
+            PamError::SessionAlreadyOpen => {
+                write!(f, "Cannot open session while one is already open")
+            }
+            PamError::SessionNotOpen => write!(f, "Cannot close session while none is open"),
+            PamError::EnvListFailure => {
+                write!(
+                    f,
+                    "It was not possible to get a list of environment variables"
+                )
+            }
+        }
+    }
 }
 
 impl PamError {
     /// Create a new PamError based on the error number from pam and a handle to a pam session
     /// The handle to the pam session is allowed to be null
-    pub(crate) fn from_pam(errno: libc::c_int, handle: *const pam_handle_t) -> PamError {
+    pub(crate) fn from_pam(errno: libc::c_int) -> PamError {
         let tp = PamErrorType::from_int(errno);
-        let str = tp.get_err_msg(handle);
-        PamError::Pam(tp, str)
+        let msg = tp.get_err_msg();
+        PamError::Pam(tp, msg)
     }
 }
 
 /// Returns `Ok(())` if the error code is `PAM_SUCCESS` or a `PamError` in other cases
-pub(crate) fn pam_err(err: libc::c_int, handle: *const pam_handle_t) -> Result<(), PamError> {
+pub(crate) fn pam_err(err: libc::c_int) -> Result<(), PamError> {
     if err == PAM_SUCCESS as libc::c_int {
         Ok(())
     } else {
-        Err(PamError::from_pam(err, handle))
+        Err(PamError::from_pam(err))
     }
 }
 

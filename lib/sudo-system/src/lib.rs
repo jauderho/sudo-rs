@@ -3,14 +3,16 @@ use std::{
     fs::OpenOptions,
     io,
     mem::MaybeUninit,
-    os::fd::AsRawFd,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     path::PathBuf,
+    ptr::null,
     str::FromStr,
 };
 
 pub use audit::secure_open;
 use interface::{DeviceId, GroupId, ProcessId, UserId};
 pub use libc::PATH_MAX;
+use libc::{O_CLOEXEC, O_NONBLOCK};
 use sudo_cutils::*;
 use time::SystemTime;
 
@@ -24,13 +26,66 @@ pub mod time;
 
 pub mod timestamp;
 
+pub fn write<F: AsRawFd>(fd: &F, buf: &[u8]) -> io::Result<libc::ssize_t> {
+    cerr(unsafe { libc::write(fd.as_raw_fd(), buf.as_ptr().cast(), buf.len()) })
+}
+
+pub fn read<F: AsRawFd>(fd: &F, buf: &mut [u8]) -> io::Result<libc::ssize_t> {
+    cerr(unsafe { libc::read(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) })
+}
+
+pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
+    let mut fds = [0; 2];
+    cerr(unsafe { libc::pipe2(fds.as_mut_ptr(), O_CLOEXEC | O_NONBLOCK) })?;
+    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+}
+
+pub unsafe fn fork() -> io::Result<ProcessId> {
+    cerr(unsafe { libc::fork() })
+}
+
+pub fn setsid() -> io::Result<ProcessId> {
+    cerr(unsafe { libc::setsid() })
+}
+
+pub fn openpty() -> io::Result<(OwnedFd, OwnedFd)> {
+    let (mut leader, mut follower) = (0, 0);
+    cerr(unsafe {
+        libc::openpty(
+            &mut leader,
+            &mut follower,
+            null::<libc::c_char>() as *mut _,
+            null::<libc::termios>() as *mut _,
+            null::<libc::winsize>() as *mut _,
+        )
+    })?;
+
+    Ok(unsafe { (OwnedFd::from_raw_fd(leader), OwnedFd::from_raw_fd(follower)) })
+}
+
+pub fn set_controlling_terminal<F: AsRawFd>(fd: &F) -> io::Result<()> {
+    cerr(unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCSCTTY, 0) })?;
+    Ok(())
+}
+
 pub fn hostname() -> String {
-    let max_hostname_size = sysconf(libc::_SC_HOST_NAME_MAX).unwrap_or(256);
-    let mut buf = vec![0; max_hostname_size as usize];
-    match cerr(unsafe { libc::gethostname(buf.as_mut_ptr(), buf.len() - 1) }) {
+    // see `man 2 gethostname`
+    const MAX_HOST_NAME_SIZE_ACCORDING_TO_SUSV2: libc::c_long = 255;
+
+    // POSIX.1 systems limit hostnames to `HOST_NAME_MAX` bytes
+    // not including null-byte in the count
+    let max_hostname_size =
+        sysconf(libc::_SC_HOST_NAME_MAX).unwrap_or(MAX_HOST_NAME_SIZE_ACCORDING_TO_SUSV2) as usize;
+
+    let buffer_size = max_hostname_size + 1 /* null byte delimiter */ ;
+    let mut buf = vec![0; buffer_size];
+
+    match cerr(unsafe { libc::gethostname(buf.as_mut_ptr(), buffer_size) }) {
         Ok(_) => unsafe { string_from_ptr(buf.as_ptr()) },
+
+        // ENAMETOOLONG is returned when hostname is greater than `buffer_size`
         Err(_) => {
-            // there aren't any known conditions under which the gethostname call should fail
+            // but we have chosen a `buffer_size` larger than `max_hostname_size` so no truncation error is possible
             panic!("Unexpected error while retrieving hostname, this should not happen");
         }
     }
@@ -67,16 +122,21 @@ pub fn set_target_user(
 }
 
 /// Send a signal to a process.
-pub fn kill(pid: ProcessId, signal: c_int) -> c_int {
+pub fn kill(pid: ProcessId, signal: c_int) -> io::Result<()> {
     // SAFETY: This function cannot cause UB even if `pid` is not a valid process ID or if
     // `signal` is not a valid signal code.
-    unsafe { libc::kill(pid, signal) }
+    cerr(unsafe { libc::kill(pid, signal) }).map(|_| ())
 }
 
 /// Get a process group ID.
-pub fn getpgid(pid: ProcessId) -> ProcessId {
+pub fn getpgid(pid: ProcessId) -> io::Result<ProcessId> {
     // SAFETY: This function cannot cause UB even if `pid` is not a valid process ID
-    unsafe { libc::getpgid(pid) }
+    cerr(unsafe { libc::getpgid(pid) })
+}
+
+/// Set a process group ID.
+pub fn setpgid(pid: ProcessId, pgid: ProcessId) {
+    unsafe { libc::setpgid(pid, pgid) };
 }
 
 pub fn chdir<S: AsRef<CStr>>(path: &S) -> io::Result<()> {
@@ -560,7 +620,10 @@ mod tests {
     #[test]
     fn pgid_test() {
         use super::getpgid;
-        assert_eq!(getpgid(std::process::id() as i32), getpgid(0));
+        assert_eq!(
+            getpgid(std::process::id() as i32).unwrap(),
+            getpgid(0).unwrap()
+        );
     }
     #[test]
     fn kill_test() {
@@ -568,7 +631,7 @@ mod tests {
             .arg("1")
             .spawn()
             .unwrap();
-        super::kill(child.id() as i32, 9);
+        super::kill(child.id() as i32, 9).unwrap();
         assert!(!child.wait().unwrap().success());
     }
 }
