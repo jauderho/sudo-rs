@@ -45,10 +45,25 @@ fn cmnd_alias_nopasswd() -> Result<()> {
 }
 
 #[test]
-fn cmnd_alias_underscore() -> Result<()> {
+fn cmnd_alias_can_contain_underscore_and_digits() -> Result<()> {
     let env = Env([
-        "Cmnd_Alias UNDER_SCORE = /bin/true, /bin/ls",
-        "ALL ALL=(ALL:ALL) UNDER_SCORE",
+        "Cmnd_Alias UNDER_SCORE123 = /bin/true, /bin/ls",
+        "ALL ALL=(ALL:ALL) UNDER_SCORE123",
+    ])
+    .build()?;
+
+    Command::new("sudo")
+        .arg("true")
+        .exec(&env)?
+        .assert_success()
+}
+
+#[test]
+fn cmnd_alias_cannot_start_with_underscore() -> Result<()> {
+    let env = Env([
+        "Cmnd_Alias _INVALID = /bin/true",
+        "ALL ALL=(ALL:ALL) NOPASSWD: ALL",
+        "ALL ALL=(ALL:ALL) !_INVALID",
     ])
     .build()?;
 
@@ -60,15 +75,9 @@ fn cmnd_alias_underscore() -> Result<()> {
 
 #[test]
 fn unlisted_cmnd_fails() -> Result<()> {
-    let env = Env([
-        "Cmnd_Alias CMDS = /bin/ls",
-        "ALL ALL=(ALL:ALL) CMDSGROUP",
-    ])
-    .build()?;
+    let env = Env(["Cmnd_Alias CMDS = /bin/ls", "ALL ALL=(ALL:ALL) CMDSGROUP"]).build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
     assert!(!output.status().success());
 
@@ -93,9 +102,7 @@ fn command_specified_not_by_absolute_path_is_rejected() -> Result<()> {
     ])
     .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
@@ -118,26 +125,24 @@ fn command_alias_negation() -> Result<()> {
     let env = Env([
         "Cmnd_Alias CMDSGROUP = /bin/true, /bin/ls",
         "ALL ALL=(ALL:ALL) !CMDSGROUP",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
-        assert!(!output.status().success());
+    assert!(!output.status().success());
 
-        let stderr = output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    let stderr = output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
 
-        Ok(())
+    Ok(())
 }
 
 #[test]
@@ -150,9 +155,7 @@ fn combined_cmnd_aliases() -> Result<()> {
     ])
     .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
     assert!(!output.status().success());
     let stderr = output.stderr();
@@ -165,9 +168,7 @@ fn combined_cmnd_aliases() -> Result<()> {
         );
     }
 
-    let second_output = Command::new("sudo")
-    .arg("ls")
-    .exec(&env)?;
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
     assert!(second_output.status().success());
 
@@ -179,14 +180,13 @@ fn double_negation() -> Result<()> {
     let env = Env([
         "Cmnd_Alias CMDSGROUP = /bin/true, /bin/ls",
         "ALL ALL=(ALL:ALL) !!CMDSGROUP",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
     Command::new("sudo")
         .arg("true")
         .exec(&env)?
         .assert_success()
-
 }
 
 #[test]
@@ -196,33 +196,31 @@ fn negation_not_order_sensitive() -> Result<()> {
         "Cmnd_Alias LSCMND = /bin/ls",
         "Cmnd_Alias BAZ = TRUECMND, !LSCMND",
         "ALL ALL=(ALL:ALL) BAZ",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
     Command::new("sudo")
         .arg("true")
         .exec(&env)?
         .assert_success()?;
 
-    let output = Command::new("sudo")
-        .arg("ls")
-        .exec(&env)?;
-        assert!(!output.status().success());
+    let output = Command::new("sudo").arg("ls").exec(&env)?;
+    assert!(!output.status().success());
 
-        let stderr = output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    let stderr = output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
 
-        Ok(())
+    Ok(())
 }
 
-#[ignore]
+#[ignore = "gh398"]
 #[test]
 fn negation_combination() -> Result<()> {
     let env = Env([
@@ -230,25 +228,21 @@ fn negation_combination() -> Result<()> {
         "Cmnd_Alias LSCMND = /bin/ls",
         "Cmnd_Alias BAZ = !TRUECMND, LSCMND",
         "ALL ALL=(ALL:ALL) BAZ",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
-        assert!(output.status().success());
+    assert!(output.status().success());
 
-        let second_output = Command::new("sudo")
-        .arg("ls")
-        .exec(&env)?;
-    
-        assert!(second_output.status().success());
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
-        Ok(())
+    assert!(second_output.status().success());
+
+    Ok(())
 }
 
-#[ignore]
+#[ignore = "gh398"]
 #[test]
 fn another_negation_combination() -> Result<()> {
     let env = Env([
@@ -256,35 +250,31 @@ fn another_negation_combination() -> Result<()> {
         "Cmnd_Alias LSCMND = /bin/ls",
         "Cmnd_Alias BAZ = TRUECMND, !LSCMND",
         "ALL ALL=(ALL:ALL) !BAZ",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
-        assert!(!output.status().success());
+    assert!(!output.status().success());
 
-        let stderr = output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    let stderr = output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
 
-        let second_output = Command::new("sudo")
-        .arg("ls")
-        .exec(&env)?;
-    
-        assert!(second_output.status().success());
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
-        Ok(())
+    assert!(second_output.status().success());
+
+    Ok(())
 }
 
-#[ignore]
+#[ignore = "gh398"]
 #[test]
 fn one_more_negation_combination() -> Result<()> {
     let env = Env([
@@ -292,32 +282,28 @@ fn one_more_negation_combination() -> Result<()> {
         "Cmnd_Alias LSCMND = !/bin/ls",
         "Cmnd_Alias BAZ = TRUECMND, LSCMND",
         "ALL ALL=(ALL:ALL) !BAZ",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
-        assert!(!output.status().success());
+    assert!(!output.status().success());
 
-        let stderr = output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    let stderr = output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
 
-        let second_output = Command::new("sudo")
-        .arg("ls")
-        .exec(&env)?;
-    
-        assert!(second_output.status().success());
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
-        Ok(())
+    assert!(second_output.status().success());
+
+    Ok(())
 }
 
 #[test]
@@ -327,42 +313,38 @@ fn tripple_negation_combination() -> Result<()> {
         "Cmnd_Alias LSCMND = !/bin/ls",
         "Cmnd_Alias BAZ = TRUECMND, !LSCMND",
         "ALL ALL=(ALL:ALL) !BAZ",
-        ])
-        .build()?;
+    ])
+    .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
-        assert!(!output.status().success());
+    assert!(!output.status().success());
 
-        let stderr = output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    let stderr = output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
 
-        let second_output = Command::new("sudo")
-        .arg("ls")
-        .exec(&env)?;
-    
-        assert!(!second_output.status().success());
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
-        let stderr = second_output.stderr();
-        if sudo_test::is_original_sudo() {
-            assert_snapshot!(stderr);
-        } else {
-            assert_contains!(
-                stderr,
-                "authentication failed: I'm sorry root. I'm afraid I can't do that"
-            );
-        }
+    assert!(!second_output.status().success());
 
-        Ok(())
+    let stderr = second_output.stderr();
+    if sudo_test::is_original_sudo() {
+        assert_snapshot!(stderr);
+    } else {
+        assert_contains!(
+            stderr,
+            "authentication failed: I'm sorry root. I'm afraid I can't do that"
+        );
+    }
+
+    Ok(())
 }
 
 #[test]
@@ -374,20 +356,15 @@ fn comma_listing_works() -> Result<()> {
     ])
     .build()?;
 
-    let output = Command::new("sudo")
-        .arg("true")
-        .exec(&env)?;
+    let output = Command::new("sudo").arg("true").exec(&env)?;
 
     assert!(output.status().success());
 
-    let second_output = Command::new("sudo")
-    .arg("ls")
-    .exec(&env)?;
+    let second_output = Command::new("sudo").arg("ls").exec(&env)?;
 
     assert!(second_output.status().success());
 
     Ok(())
-
 }
 
 #[test]

@@ -234,7 +234,44 @@ fn user_alias_works() -> Result<()> {
     Ok(())
 }
 
-#[ignore]
+#[test]
+fn user_alias_can_contain_underscore_and_digits() -> Result<()> {
+    let env = Env([
+        "User_Alias UNDER_SCORE123 = ALL",
+        "UNDER_SCORE123 ALL = (ALL:ALL) NOPASSWD: /bin/true",
+    ])
+    .user(USERNAME)
+    .build()?;
+
+    Command::new("sudo")
+        .arg("true")
+        .as_user(USERNAME)
+        .exec(&env)?
+        .assert_success()?;
+
+    Ok(())
+}
+
+#[test]
+fn user_alias_cannot_start_with_underscore() -> Result<()> {
+    let env = Env([
+        "User_Alias _FOO = ALL",
+        "ALL ALL = (ALL:ALL) NOPASSWD: /bin/true",
+        "_FOO ALL = (ALL:ALL) PASSWD: ALL",
+    ])
+    .user(USERNAME)
+    .build()?;
+
+    Command::new("sudo")
+        .arg("true")
+        .as_user(USERNAME)
+        .exec(&env)?
+        .assert_success()?;
+
+    Ok(())
+}
+
+#[ignore = "gh180"]
 #[test]
 fn negated_user_alias_works() -> Result<()> {
     let env = Env("

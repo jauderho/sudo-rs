@@ -1,11 +1,9 @@
 mod check;
 mod keep;
 
-use core::fmt;
-
 use sudo_test::{Command, Env};
 
-use crate::{helpers, Result, SUDOERS_ALL_ALL_NOPASSWD};
+use crate::{helpers, EnvList, Result, SUDOERS_ALL_ALL_NOPASSWD};
 
 const BAD_TZ_VALUES: &[&str] = &[
     // "It consists of a fully-qualified path name, optionally prefixed with a colon (‘:’), that
@@ -133,22 +131,6 @@ fn unchecked_tz() -> Result<()> {
         assert_eq!(Some(value), sudo_env.get(TZ).copied());
     }
     Ok(())
-}
-
-enum EnvList {
-    #[allow(dead_code)]
-    Check,
-    Keep,
-}
-
-impl fmt::Display for EnvList {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            EnvList::Check => "env_check",
-            EnvList::Keep => "env_keep",
-        };
-        f.write_str(s)
-    }
 }
 
 fn equal_single(env_list: EnvList) -> Result<()> {
@@ -652,6 +634,159 @@ fn can_override_after_bang(env_list: EnvList) -> Result<()> {
 
     assert!(sudo_env.get(env_name1).is_none());
     assert_eq!(Some(env_val2), sudo_env.get(env_name2).copied());
+
+    Ok(())
+}
+
+fn wildcard_works(env_list: EnvList) -> Result<()> {
+    let kept_name1 = "FERRIS";
+    let kept_value1 = "ferris";
+    let kept_name2 = "FS";
+    let kept_value2 = "fs";
+    let discarded_name = "SF";
+    let discarded_value = "sf";
+
+    let env = Env([
+        SUDOERS_ALL_ALL_NOPASSWD,
+        &format!("Defaults {env_list} = F*S"),
+    ])
+    .build()?;
+
+    let stdout = Command::new("env")
+        .arg(format!("{kept_name1}={kept_value1}"))
+        .arg(format!("{kept_name2}={kept_value2}"))
+        .arg(format!("{discarded_name}={discarded_value}"))
+        .args(["sudo", "env"])
+        .exec(&env)?
+        .stdout()?;
+
+    let sudo_env = helpers::parse_env_output(&stdout)?;
+
+    assert_eq!(Some(kept_value1), sudo_env.get(kept_name1).copied());
+    assert_eq!(Some(kept_value2), sudo_env.get(kept_name2).copied());
+    assert_eq!(None, sudo_env.get(discarded_value).copied());
+
+    Ok(())
+}
+
+fn double_wildcard_is_ok(env_list: EnvList) -> Result<()> {
+    let kept_name1 = "FERRIS";
+    let kept_value1 = "ferris";
+    let kept_name2 = "FS";
+    let kept_value2 = "fs";
+    let discarded_name = "SF";
+    let discarded_value = "sf";
+
+    let env = Env([
+        SUDOERS_ALL_ALL_NOPASSWD,
+        &format!("Defaults {env_list} = F**"),
+        &format!("Defaults {env_list} += **S"),
+    ])
+    .build()?;
+
+    let stdout = Command::new("env")
+        .arg(format!("{kept_name1}={kept_value1}"))
+        .arg(format!("{kept_name2}={kept_value2}"))
+        .arg(format!("{discarded_name}={discarded_value}"))
+        .args(["sudo", "env"])
+        .exec(&env)?
+        .stdout()?;
+
+    let sudo_env = helpers::parse_env_output(&stdout)?;
+
+    assert_eq!(Some(kept_value1), sudo_env.get(kept_name1).copied());
+    assert_eq!(Some(kept_value2), sudo_env.get(kept_name2).copied());
+    assert_eq!(None, sudo_env.get(discarded_value).copied());
+
+    Ok(())
+}
+
+fn minus_equal_can_remove_wildcard(env_list: EnvList) -> Result<()> {
+    let name1 = "FERRIS";
+    let value1 = "ferris";
+    let name2 = "F";
+    let value2 = "f";
+
+    let env = Env([
+        SUDOERS_ALL_ALL_NOPASSWD,
+        &format!("Defaults {env_list} = F*"),
+        &format!("Defaults {env_list} -= F*"),
+    ])
+    .build()?;
+
+    let stdout = Command::new("env")
+        .arg(format!("{name1}={value1}"))
+        .arg(format!("{name2}={value2}"))
+        .args(["sudo", "env"])
+        .exec(&env)?
+        .stdout()?;
+
+    let sudo_env = helpers::parse_env_output(&stdout)?;
+
+    assert_eq!(None, sudo_env.get(name1).copied());
+    assert_eq!(None, sudo_env.get(name2).copied());
+
+    Ok(())
+}
+
+fn accepts_uncommon_var_names(env_list: EnvList) -> Result<()> {
+    let name1 = "00";
+    let value1 = "42";
+    let name2 = "0A";
+    let value2 = "42";
+    let name3 = "ferris";
+    let value3 = "FERRIS";
+
+    let env = Env([
+        SUDOERS_ALL_ALL_NOPASSWD,
+        &format!("Defaults {env_list} = \"{name1} {name2} {name3}\""),
+    ])
+    .build()?;
+
+    let stdout = Command::new("env")
+        .arg(format!("{name1}={value1}"))
+        .arg(format!("{name2}={value2}"))
+        .arg(format!("{name3}={value3}"))
+        .args(["sudo", "env"])
+        .exec(&env)?
+        .stdout()?;
+
+    let sudo_env = helpers::parse_env_output(&stdout)?;
+
+    assert_eq!(Some(value1), sudo_env.get(name1).copied());
+    assert_eq!(Some(value2), sudo_env.get(name2).copied());
+    assert_eq!(Some(value3), sudo_env.get(name3).copied());
+
+    Ok(())
+}
+
+fn skips_invalid_variable_names(env_list: EnvList) -> Result<()> {
+    let kept_name = "FERRIS";
+    let kept_value = "ferris";
+    let discarded_name1 = "GHOST";
+    let discarded_value1 = "ghost";
+    let discarded_name2 = "G";
+    let discarded_value2 = "g";
+
+    let env = Env([
+        SUDOERS_ALL_ALL_NOPASSWD,
+        &format!("Defaults {env_list} = \"G.* {kept_name}\""),
+    ])
+    .build()?;
+
+    let stdout = Command::new("env")
+        .arg(format!("{kept_name}={kept_value}"))
+        .arg(format!("{discarded_name1}={discarded_value1}"))
+        .arg(format!("{discarded_name2}={discarded_value2}"))
+        .args(["sudo", "env"])
+        .exec(&env)?
+        .stdout()?;
+
+    let sudo_env = helpers::parse_env_output(&stdout)?;
+
+    assert_eq!(Some(kept_value), sudo_env.get(kept_name).copied());
+    assert_eq!(None, sudo_env.get(discarded_name1).copied());
+    assert_eq!(None, sudo_env.get(discarded_name2).copied());
 
     Ok(())
 }

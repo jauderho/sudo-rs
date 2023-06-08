@@ -26,6 +26,10 @@ pub mod time;
 
 pub mod timestamp;
 
+pub mod signal;
+
+pub mod poll;
+
 pub fn write<F: AsRawFd>(fd: &F, buf: &[u8]) -> io::Result<libc::ssize_t> {
     cerr(unsafe { libc::write(fd.as_raw_fd(), buf.as_ptr().cast(), buf.len()) })
 }
@@ -40,6 +44,21 @@ pub fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
 }
 
+#[cfg(target_os = "linux")]
+/// Create a new process.
+pub fn fork() -> io::Result<ProcessId> {
+    // SAFETY: `fork` is implemented using `clone` in linux so we don't need to worry about signal
+    // safety.
+    cerr(unsafe { libc::fork() })
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Create a new process.
+///
+/// # Safety
+///
+/// In a multithreaded program, only async-signal-safe functions are guaranteed to work in the
+/// child process until a call to `execve` or a similar function is done.
 pub unsafe fn fork() -> io::Result<ProcessId> {
     cerr(unsafe { libc::fork() })
 }

@@ -2,7 +2,7 @@ use sudo_test::{Command, Env};
 
 use crate::{helpers, Result, SUDOERS_ALL_ALL_NOPASSWD, SUDO_ENV_DEFAULT_PATH};
 
-const ENV_LIST: super::EnvList = super::EnvList::Keep;
+const ENV_LIST: crate::EnvList = crate::EnvList::Keep;
 
 #[test]
 fn equal_single() -> Result<()> {
@@ -65,7 +65,7 @@ fn if_value_starts_with_parentheses_variable_is_removed() -> Result<()> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "gh344"]
 fn key_value_matches() -> Result<()> {
     super::key_value_matches(ENV_LIST)
 }
@@ -76,13 +76,13 @@ fn key_value_no_match() -> Result<()> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "gh345"]
 fn key_value_syntax_needs_double_quotes() -> Result<()> {
     super::key_value_syntax_needs_double_quotes(ENV_LIST)
 }
 
 #[test]
-#[ignore]
+#[ignore = "gh346"]
 fn key_value_where_value_is_parentheses_glob() -> Result<()> {
     super::key_value_where_value_is_parentheses_glob(ENV_LIST)
 }
@@ -110,6 +110,32 @@ fn can_append_after_bang() -> Result<()> {
 #[test]
 fn can_override_after_bang() -> Result<()> {
     super::can_override_after_bang(ENV_LIST)
+}
+
+#[test]
+fn wildcard_works() -> Result<()> {
+    super::wildcard_works(ENV_LIST)
+}
+
+#[test]
+fn double_wildcard_is_ok() -> Result<()> {
+    super::double_wildcard_is_ok(ENV_LIST)
+}
+
+#[test]
+fn minus_equal_can_remove_wildcard() -> Result<()> {
+    super::minus_equal_can_remove_wildcard(ENV_LIST)
+}
+
+#[test]
+fn accepts_uncommon_var_names() -> Result<()> {
+    super::accepts_uncommon_var_names(ENV_LIST)
+}
+
+#[test]
+#[ignore = "gh384"]
+fn skips_invalid_variable_names() -> Result<()> {
+    super::skips_invalid_variable_names(ENV_LIST)
 }
 
 // DISPLAY, PATH and TERM are env vars preserved by sudo by default
