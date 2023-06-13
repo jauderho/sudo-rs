@@ -1,10 +1,10 @@
 #![deny(unsafe_code)]
 
 mod backchannel;
+mod event;
 mod io_util;
 mod monitor;
-mod pty;
-mod signal;
+mod parent;
 
 use std::{
     ffi::{CString, OsStr},
@@ -15,9 +15,11 @@ use std::{
 };
 
 use backchannel::BackchannelPair;
+use monitor::MonitorClosure;
+use parent::ParentClosure;
 use sudo_common::{context::LaunchType::Login, Context, Environment};
 use sudo_log::user_error;
-use sudo_system::{fork, openpty, set_target_user};
+use sudo_system::{fork, set_target_user, term::openpty};
 
 /// Based on `ogsudo`s `exec_pty` function.
 ///
@@ -75,19 +77,23 @@ pub fn run_command(ctx: Context, env: Environment) -> io::Result<(ExitReason, im
     let backchannels = BackchannelPair::new()?;
 
     // FIXME: We should block all the incoming signals before forking and unblock them just after
-    // initializing the signal hadnlers.
+    // initializing the signal handlers.
     let monitor_pid = fork()?;
     // Monitor logic. Based on `exec_monitor`.
     if monitor_pid == 0 {
-        match monitor::MonitorRelay::new(command, pty_follower, backchannels.monitor)?.run() {}
+        let (monitor, mut dispatcher) =
+            MonitorClosure::new(command, pty_follower, backchannels.monitor);
+        match monitor.run(&mut dispatcher) {}
     } else {
-        pty::PtyRelay::new(
+        let (parent, mut dispatcher) = ParentClosure::new(
             monitor_pid,
             ctx.process.pid,
             pty_leader,
             backchannels.parent,
-        )?
-        .run()
+        )?;
+        parent
+            .run(&mut dispatcher)
+            .map(|exit_reason| (exit_reason, move || drop(dispatcher)))
     }
 }
 
