@@ -28,7 +28,7 @@ libc = "0.2.139"
 glob = "0.3.1"
 signal-hook = { version = "0.3.15", features = ["extended-siginfo"] }
 signal-hook-registry = "1.4.1"
-log = "0.4.17"
+log = "0.4.19"
 env_logger = { version = "0.9.3", default-features = false }
 
 [dev-dependencies]
