@@ -1,7 +1,7 @@
 use std::process::exit;
 
 use crate::cli::SudoOptions;
-use crate::common::{Context, Error};
+use crate::common::{Context, Environment, Error};
 use crate::env::environment;
 use crate::exec::ExitReason;
 use crate::sudoers::{Authorization, DirChange, Policy, PreJudgementPolicy};
@@ -20,8 +20,8 @@ pub trait PolicyPlugin {
 
 pub trait AuthPlugin {
     fn init(&mut self, context: &Context) -> Result<(), Error>;
-    fn authenticate(&mut self, context: &Context) -> Result<(), Error>;
-    fn pre_exec(&mut self, context: &Context) -> Result<(), Error>;
+    fn authenticate(&mut self, context: &Context, attempts: u16) -> Result<(), Error>;
+    fn pre_exec(&mut self, context: &Context) -> Result<Environment, Error>;
     fn cleanup(&mut self);
 }
 
@@ -48,20 +48,25 @@ impl<Policy: PolicyPlugin, Auth: AuthPlugin> Pipeline<Policy, Auth> {
                     context.current_user.name
                 )));
             }
-            Authorization::Allowed { must_authenticate } => {
+            Authorization::Allowed {
+                must_authenticate,
+                allowed_attempts,
+            } => {
                 self.apply_policy_to_context(&mut context, &policy)?;
                 self.authenticator.init(&context)?;
                 if must_authenticate {
-                    self.authenticator.authenticate(&context)?;
+                    self.authenticator
+                        .authenticate(&context, allowed_attempts)?;
                 }
             }
         }
 
-        self.authenticator.pre_exec(&context)?;
+        let additional_env = self.authenticator.pre_exec(&context)?;
 
         // build environment
         let current_env = std::env::vars_os().collect();
-        let target_env = environment::get_target_environment(current_env, &context, &policy);
+        let target_env =
+            environment::get_target_environment(current_env, additional_env, &context, &policy);
 
         let pid = context.process.pid;
 

@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs::File;
 
 use crate::common::{error::Error, Context};
-use crate::log::{auth_warn, user_warn};
+use crate::log::{auth_warn, dev_info, user_warn};
 use crate::pam::{CLIConverser, Converser, PamContext, PamError, PamErrorType, PamResult};
 use crate::system::{
     time::Duration,
@@ -93,7 +95,7 @@ impl<C: Converser> PamAuthenticator<C> {
 impl PamAuthenticator<CLIConverser> {
     pub fn new_cli() -> PamAuthenticator<CLIConverser> {
         PamAuthenticator::new(|context| {
-            let mut pam = PamContext::builder_cli("sudo", context.stdin)
+            let mut pam = PamContext::builder_cli("sudo", context.stdin, context.non_interactive)
                 .target_user(&context.current_user.name)
                 .service_name("sudo")
                 .build()?;
@@ -110,7 +112,7 @@ impl<C: Converser> AuthPlugin for PamAuthenticator<C> {
         Ok(())
     }
 
-    fn authenticate(&mut self, context: &Context) -> Result<(), Error> {
+    fn authenticate(&mut self, context: &Context, mut max_tries: u16) -> Result<(), Error> {
         let pam = self
             .pam
             .as_mut()
@@ -124,7 +126,6 @@ impl<C: Converser> AuthPlugin for PamAuthenticator<C> {
         let (must_authenticate, records_file) = determine_auth_status(scope, context);
 
         if must_authenticate {
-            let mut max_tries = 3;
             let mut current_try = 0;
             loop {
                 current_try += 1;
@@ -142,6 +143,8 @@ impl<C: Converser> AuthPlugin for PamAuthenticator<C> {
                         max_tries -= 1;
                         if max_tries == 0 {
                             return Err(Error::MaxAuthAttempts(current_try));
+                        } else if context.non_interactive {
+                            return Err(Error::Authentication("interaction required".to_string()));
                         } else {
                             user_warn!("Authentication failed, try again.");
                         }
@@ -166,15 +169,32 @@ impl<C: Converser> AuthPlugin for PamAuthenticator<C> {
         Ok(())
     }
 
-    fn pre_exec(&mut self, _context: &Context) -> Result<(), Error> {
+    fn pre_exec(&mut self, context: &Context) -> Result<HashMap<OsString, OsString>, Error> {
         let pam = self
             .pam
             .as_mut()
             .expect("Pam must be initialized before pre_exec");
 
-        pam.validate_account()?;
+        // make sure that the user that needed to authenticate has a valid token
+        pam.validate_account_or_change_auth_token()?;
+
+        // switch pam over to the target user
+        pam.set_user(&context.target_user.name)?;
+
+        // make sure that credentials are loaded for the target user
+        // errors are ignored because not all modules support this functionality
+        if let Err(e) = pam.credentials_reinitialize() {
+            dev_info!(
+                "PAM gave an error while trying to re-initialize credentials: {:?}",
+                e
+            );
+        }
+
         pam.open_session()?;
-        Ok(())
+
+        let env_vars = pam.env()?;
+
+        Ok(env_vars)
     }
 
     fn cleanup(&mut self) {

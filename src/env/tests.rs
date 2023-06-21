@@ -2,7 +2,7 @@ use crate::cli::SudoOptions;
 use crate::common::{CommandAndArguments, Context, Environment};
 use crate::env::environment::get_target_environment;
 use crate::system::{Group, Process, User};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const TESTS: &str = "
 > env
@@ -128,12 +128,10 @@ fn create_test_context(sudo_options: &SudoOptions) -> Context {
         } else {
             root_group
         },
-        set_home: sudo_options.set_home,
-        preserve_env: sudo_options.preserve_env.clone(),
-        path,
         launch: crate::common::context::LaunchType::Direct,
         chdir: sudo_options.directory.clone(),
         stdin: sudo_options.stdin,
+        non_interactive: sudo_options.non_interactive,
         process: Process::new(),
         use_session_records: false,
     }
@@ -156,7 +154,8 @@ fn test_environment_variable_filtering() {
         let options = SudoOptions::try_parse_from(cmd.split_whitespace()).unwrap();
         let settings = crate::sudoers::Judgement::default();
         let context = create_test_context(&options);
-        let resulting_env = get_target_environment(initial_env.clone(), &context, &settings);
+        let resulting_env =
+            get_target_environment(initial_env.clone(), HashMap::new(), &context, &settings);
 
         let resulting_env = environment_to_set(resulting_env);
         let expected_env = environment_to_set(expected_env);

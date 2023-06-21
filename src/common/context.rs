@@ -11,18 +11,16 @@ use super::{
 #[derive(Debug)]
 pub struct Context {
     // cli options
-    pub preserve_env: Vec<String>,
-    pub set_home: bool,
     pub launch: LaunchType,
     pub chdir: Option<PathBuf>,
     pub command: CommandAndArguments,
     pub target_user: User,
     pub target_group: Group,
     pub stdin: bool,
+    pub non_interactive: bool,
     pub use_session_records: bool,
     // system
     pub hostname: String,
-    pub path: String,
     pub current_user: User,
     pub process: Process,
 }
@@ -50,17 +48,15 @@ impl Context {
 
         Ok(Context {
             hostname,
-            path,
             command,
             current_user,
             target_user,
             target_group,
-            set_home: sudo_options.set_home,
-            preserve_env: sudo_options.preserve_env,
             use_session_records: !sudo_options.reset_timestamp,
             launch,
             chdir: sudo_options.directory,
             stdin: sudo_options.stdin,
+            non_interactive: sudo_options.non_interactive,
             process: Process::new(),
         })
     }
