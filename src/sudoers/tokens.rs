@@ -178,14 +178,24 @@ impl Token for Command {
 
     const ESCAPE: char = '\\';
     fn escaped(c: char) -> bool {
-        "\\,:=#".contains(c)
+        matches!(c, '\\' | ',' | ':' | '=' | '#')
     }
 }
 
 impl Many for Command {}
 
-/// An environment variable name pattern consists of alphanumeric characters as well as "_", "%" and wildcard "*"
-/// (Value patterns are not supported yet)
+pub struct DefaultName(pub String);
+
+impl Token for DefaultName {
+    fn construct(text: String) -> Result<Self, String> {
+        Ok(DefaultName(text))
+    }
+
+    fn accept(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+}
+
 pub struct EnvVar(pub String);
 
 impl Token for EnvVar {
@@ -194,7 +204,12 @@ impl Token for EnvVar {
     }
 
     fn accept(c: char) -> bool {
-        c.is_ascii_alphanumeric() || "*_%".contains(c)
+        !c.is_control() && !c.is_whitespace() && !Self::escaped(c)
+    }
+
+    const ESCAPE: char = '\\';
+    fn escaped(c: char) -> bool {
+        matches!(c, '\\' | '=' | '#' | '"')
     }
 }
 
@@ -213,7 +228,7 @@ impl Token for QuotedText {
 
     const ESCAPE: char = '\\';
     fn escaped(c: char) -> bool {
-        "\\\"".contains(c) || c.is_control()
+        matches!(c, '\\' | '"') || c.is_control()
     }
 }
 
@@ -232,7 +247,7 @@ impl Token for IncludePath {
 
     const ESCAPE: char = '\\';
     fn escaped(c: char) -> bool {
-        "\\\" ".contains(c)
+        matches!(c, '\\' | '"' | ' ')
     }
 }
 
@@ -252,7 +267,7 @@ impl Token for StringParameter {
 
     const ESCAPE: char = '\\';
     fn escaped(c: char) -> bool {
-        "\\\" #,".contains(c)
+        matches!(c, '\\' | '"' | ' ' | '#' | ',')
     }
 }
 
@@ -287,6 +302,6 @@ impl Token for ChDir {
 
     const ESCAPE: char = '\\';
     fn escaped(c: char) -> bool {
-        "\\\" ".contains(c)
+        matches!(c, '\\' | '"' | ' ')
     }
 }
