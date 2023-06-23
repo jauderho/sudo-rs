@@ -6,36 +6,41 @@ use std::{
         unix::{net::UnixStream, process::CommandExt},
     },
     process::{exit, Command},
-    time::Duration,
 };
 
-use crate::system::{
-    fork, getpgid,
-    interface::ProcessId,
-    kill, setpgid, setsid,
-    signal::SignalInfo,
-    term::{set_controlling_terminal, tcgetpgrp, tcsetpgrp},
-    wait::{waitpid, WaitError, WaitOptions},
+use crate::{
+    exec::terminate_process,
+    system::{
+        fork, getpgid,
+        interface::ProcessId,
+        kill, setpgid, setsid,
+        signal::SignalInfo,
+        term::{set_controlling_terminal, tcgetpgrp, tcsetpgrp},
+        wait::{waitpid, WaitError, WaitOptions, WaitStatus},
+    },
 };
 use crate::{
-    exec::event::StopReason,
-    log::{dev_info, dev_warn},
+    exec::{
+        event::StopReason,
+        use_pty::{SIGCONT_BG, SIGCONT_FG},
+    },
+    log::{dev_error, dev_info, dev_warn},
 };
 
 use signal_hook::consts::*;
 
-use super::{
-    backchannel::{MonitorBackchannel, MonitorMessage, ParentMessage},
+use crate::exec::{
     event::{EventClosure, EventDispatcher},
     io_util::{retry_while_interrupted, was_interrupted},
-    ExitReason,
+    use_pty::backchannel::{MonitorBackchannel, MonitorMessage, ParentMessage},
 };
-use super::{cond_fmt, signal_fmt};
+use crate::exec::{opt_fmt, signal_fmt};
 
 // FIXME: This should return `io::Result<!>` but `!` is not stable yet.
 pub(super) fn exec_monitor(
     pty_follower: OwnedFd,
     command: Command,
+    foreground: bool,
     backchannel: &mut MonitorBackchannel,
 ) -> io::Result<()> {
     let mut dispatcher = EventDispatcher::<MonitorClosure>::new()?;
@@ -80,7 +85,7 @@ pub(super) fn exec_monitor(
     if command_pid == 0 {
         drop(errpipe_rx);
 
-        let err = exec_command(command, pty_follower);
+        let err = exec_command(command, foreground, pty_follower);
         dev_warn!("failed to execute command: {err}");
         // If `exec_command` returns, it means that executing the command failed. Send the error to
         // the monitor using the pipe.
@@ -97,24 +102,44 @@ pub(super) fn exec_monitor(
         dev_warn!("cannot send command PID to parent: {err}");
     }
 
-    let mut closure = MonitorClosure::new(command_pid, errpipe_rx, backchannel, &mut dispatcher);
+    let mut closure = MonitorClosure::new(
+        command_pid,
+        pty_follower,
+        errpipe_rx,
+        backchannel,
+        &mut dispatcher,
+    );
 
     // Set the foreground group for the pty follower.
-    tcsetpgrp(&pty_follower, closure.command_pgrp).ok();
+    if foreground {
+        if let Err(err) = tcsetpgrp(&closure.pty_follower, closure.command_pgrp) {
+            dev_error!(
+                "cannot set foreground progess group to command ({}): {err}",
+                closure.command_pgrp
+            );
+        }
+    }
 
     // FIXME (ogsudo): Here's where the signal mask is removed because the handlers for the signals
     // have been setup after initializing the closure.
-    // FIXME (ogsudo): Set the command as the foreground process for the follower.
 
     // Start the event loop.
     let reason = dispatcher.event_loop(&mut closure);
+
     // FIXME (ogsudo): Terminate the command using `killpg` if it's not terminated.
-    // FIXME (ogsudo): Take the controlling tty so the command's children don't receive SIGHUP when we exit.
+
+    // Take the controlling tty so the command's children don't receive SIGHUP when we exit.
+    if let Err(err) = tcsetpgrp(&closure.pty_follower, closure.monitor_pgrp) {
+        dev_error!(
+            "cannot set foreground process group to monitor ({}): {err}",
+            closure.monitor_pgrp
+        );
+    }
 
     match reason {
         StopReason::Break(()) => {}
-        StopReason::Exit(exit_reason) => {
-            closure.backchannel.send(&exit_reason.into()).ok();
+        StopReason::Exit(command_status) => {
+            closure.backchannel.send(&command_status.into()).ok();
         }
     }
 
@@ -126,16 +151,22 @@ pub(super) fn exec_monitor(
 }
 
 // FIXME: This should return `io::Result<!>` but `!` is not stable yet.
-fn exec_command(mut command: Command, pty_follower: OwnedFd) -> io::Error {
+fn exec_command(mut command: Command, foreground: bool, pty_follower: OwnedFd) -> io::Error {
     // FIXME (ogsudo): Do any additional configuration that needs to be run after `fork` but before `exec`
     let command_pid = std::process::id() as ProcessId;
 
     setpgid(0, command_pid).ok();
 
-    // Wait for the monitor to set us as the foreground group for the pty.
-    while !tcgetpgrp(&pty_follower).is_ok_and(|pid| pid == command_pid) {
-        std::thread::sleep(std::time::Duration::from_micros(1));
+    // Wait for the monitor to set us as the foreground group for the pty if we are in the
+    // foreground.
+    if foreground {
+        while !tcgetpgrp(&pty_follower).is_ok_and(|pid| pid == command_pid) {
+            std::thread::sleep(std::time::Duration::from_micros(1));
+        }
     }
+
+    // Done with the pty follower.
+    drop(pty_follower);
 
     command.exec()
 }
@@ -146,6 +177,8 @@ struct MonitorClosure<'a> {
     /// This is `Some` iff the process is still running.
     command_pid: Option<ProcessId>,
     command_pgrp: ProcessId,
+    monitor_pgrp: ProcessId,
+    pty_follower: OwnedFd,
     errpipe_rx: UnixStream,
     backchannel: &'a mut MonitorBackchannel,
 }
@@ -153,11 +186,14 @@ struct MonitorClosure<'a> {
 impl<'a> MonitorClosure<'a> {
     fn new(
         command_pid: ProcessId,
+        pty_follower: OwnedFd,
         errpipe_rx: UnixStream,
         backchannel: &'a mut MonitorBackchannel,
         dispatcher: &mut EventDispatcher<Self>,
     ) -> Self {
-        // FIXME (ogsudo): Store the pgid of the monitor.
+        // Store the pgid of the monitor.
+        // FIXME: ogsudo does not handle this error explicitly.
+        let monitor_pgrp = getpgid(0).unwrap_or(-1);
 
         // Register the callback to receive the IO error if the command fails to execute.
         dispatcher.set_read_callback(&errpipe_rx, |monitor, dispatcher| {
@@ -178,6 +214,8 @@ impl<'a> MonitorClosure<'a> {
         Self {
             command_pid: Some(command_pid),
             command_pgrp,
+            monitor_pgrp,
+            pty_follower,
             errpipe_rx,
             backchannel,
         }
@@ -211,7 +249,7 @@ impl<'a> MonitorClosure<'a> {
                     // Forward signal to the command.
                     MonitorMessage::Signal(signal) => {
                         if let Some(command_pid) = self.command_pid {
-                            send_signal(signal, command_pid, true)
+                            self.send_signal(signal, command_pid, true)
                         }
                     }
                 }
@@ -232,7 +270,7 @@ impl<'a> MonitorClosure<'a> {
             dev_info!("command ({command_pid}) exited with status code {exit_code}");
             // The command did exit, set it's PID to `None`.
             self.command_pid = None;
-            dispatcher.set_exit(ExitReason::Code(exit_code))
+            dispatcher.set_exit(status);
         } else if let Some(signal) = status.term_signal() {
             dev_info!(
                 "command ({command_pid}) was terminated by {}",
@@ -240,15 +278,20 @@ impl<'a> MonitorClosure<'a> {
             );
             // The command was terminated, set it's PID to `None`.
             self.command_pid = None;
-            dispatcher.set_exit(ExitReason::Signal(signal))
+            dispatcher.set_exit(status);
         } else if let Some(signal) = status.stop_signal() {
             dev_info!(
                 "command ({command_pid}) was stopped by {}",
                 signal_fmt(signal),
             );
-            // FIXME: we should save the foreground process group ID so we can restore it later.
+            // Save the foreground process group ID so we can restore it later.
+            if let Ok(pgrp) = tcgetpgrp(&self.pty_follower) {
+                if pgrp != self.monitor_pgrp {
+                    self.command_pgrp = pgrp;
+                }
+            }
             self.backchannel
-                .send(&ParentMessage::CommandSignal(signal))
+                .send(&ParentMessage::CommandStatus(status))
                 .ok();
         } else if status.did_continue() {
             dev_info!("command ({command_pid}) continued execution");
@@ -284,27 +327,43 @@ impl<'a> MonitorClosure<'a> {
             }
         }
     }
-}
 
-/// Send a signal to the command.
-fn send_signal(signal: c_int, command_pid: ProcessId, from_parent: bool) {
-    dev_info!(
-        "sending {}{} to command",
-        signal_fmt(signal),
-        cond_fmt(" from parent", from_parent),
-    );
-    // FIXME: We should call `killpg` instead of `kill`.
-    match signal {
-        SIGALRM => {
-            // Kill the command with increasing urgency. Based on `terminate_command`.
-            kill(command_pid, SIGHUP).ok();
-            kill(command_pid, SIGTERM).ok();
-            std::thread::sleep(Duration::from_secs(2));
-            kill(command_pid, SIGKILL).ok();
-        }
-        signal => {
-            // Send the signal to the command.
-            kill(command_pid, signal).ok();
+    /// Send a signal to the command.
+    fn send_signal(&self, signal: c_int, command_pid: ProcessId, from_parent: bool) {
+        dev_info!(
+            "sending {}{} to command",
+            signal_fmt(signal),
+            opt_fmt(from_parent, " from parent"),
+        );
+        // FIXME: We should call `killpg` instead of `kill`.
+        match signal {
+            SIGALRM => {
+                terminate_process(command_pid, false);
+            }
+            SIGCONT_FG => {
+                // Continue with the command as the foreground process group
+                if let Err(err) = tcsetpgrp(&self.pty_follower, self.command_pgrp) {
+                    dev_error!(
+                        "cannot set the foreground process group to command ({}): {err}",
+                        self.command_pgrp
+                    );
+                }
+                kill(command_pid, SIGCONT).ok();
+            }
+            SIGCONT_BG => {
+                // Continue with the monitor as the foreground process group
+                if let Err(err) = tcsetpgrp(&self.pty_follower, self.monitor_pgrp) {
+                    dev_error!(
+                        "cannot set the foreground process group to monitor ({}): {err}",
+                        self.monitor_pgrp
+                    );
+                }
+                kill(command_pid, SIGCONT).ok();
+            }
+            signal => {
+                // Send the signal to the command.
+                kill(command_pid, signal).ok();
+            }
         }
     }
 }
@@ -336,12 +395,12 @@ fn is_self_terminating(
 
 impl<'a> EventClosure for MonitorClosure<'a> {
     type Break = ();
-    type Exit = ExitReason;
+    type Exit = WaitStatus;
 
     fn on_signal(&mut self, info: SignalInfo, dispatcher: &mut EventDispatcher<Self>) {
         dev_info!(
             "monitor received{} {} from {}",
-            cond_fmt(" user signaled", info.is_user_signaled()),
+            opt_fmt(info.is_user_signaled(), " user signaled"),
             signal_fmt(info.signal()),
             info.pid()
         );
@@ -357,7 +416,7 @@ impl<'a> EventClosure for MonitorClosure<'a> {
             // Skip the signal if it was sent by the user and it is self-terminating.
             _ if info.is_user_signaled()
                 && is_self_terminating(info.pid(), command_pid, self.command_pgrp) => {}
-            signal => send_signal(signal, command_pid, false),
+            signal => self.send_signal(signal, command_pid, false),
         }
     }
 }
