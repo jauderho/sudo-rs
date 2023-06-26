@@ -1,10 +1,7 @@
 use std::{
     ffi::c_int,
     io::{self, Read, Write},
-    os::{
-        fd::OwnedFd,
-        unix::{net::UnixStream, process::CommandExt},
-    },
+    os::unix::{net::UnixStream, process::CommandExt},
     process::{exit, Command},
 };
 
@@ -15,7 +12,7 @@ use crate::{
         interface::ProcessId,
         kill, setpgid, setsid,
         signal::SignalInfo,
-        term::Terminal,
+        term::{PtyFollower, Terminal},
         wait::{Wait, WaitError, WaitOptions, WaitStatus},
         ForkResult,
     },
@@ -39,7 +36,7 @@ use crate::exec::{opt_fmt, signal_fmt};
 
 // FIXME: This should return `io::Result<!>` but `!` is not stable yet.
 pub(super) fn exec_monitor(
-    pty_follower: OwnedFd,
+    pty_follower: PtyFollower,
     command: Command,
     foreground: bool,
     backchannel: &mut MonitorBackchannel,
@@ -125,7 +122,17 @@ pub(super) fn exec_monitor(
     // Start the event loop.
     let reason = dispatcher.event_loop(&mut closure);
 
-    // FIXME (ogsudo): Terminate the command using `killpg` if it's not terminated.
+    // Terminate the command if it's not terminated.
+    if let Some(command_pid) = closure.command_pid {
+        terminate_process(command_pid, true);
+
+        loop {
+            match command_pid.wait(WaitOptions::new()) {
+                Err(WaitError::Io(err)) if was_interrupted(&err) => {}
+                _ => break,
+            }
+        }
+    }
 
     // Take the controlling tty so the command's children don't receive SIGHUP when we exit.
     if let Err(err) = closure.pty_follower.tcsetpgrp(closure.monitor_pgrp) {
@@ -161,7 +168,7 @@ pub(super) fn exec_monitor(
 }
 
 // FIXME: This should return `io::Result<!>` but `!` is not stable yet.
-fn exec_command(mut command: Command, foreground: bool, pty_follower: OwnedFd) -> io::Error {
+fn exec_command(mut command: Command, foreground: bool, pty_follower: PtyFollower) -> io::Error {
     // FIXME (ogsudo): Do any additional configuration that needs to be run after `fork` but before `exec`
     let command_pid = std::process::id() as ProcessId;
 
@@ -188,7 +195,7 @@ struct MonitorClosure<'a> {
     command_pid: Option<ProcessId>,
     command_pgrp: ProcessId,
     monitor_pgrp: ProcessId,
-    pty_follower: OwnedFd,
+    pty_follower: PtyFollower,
     errpipe_rx: UnixStream,
     backchannel: &'a mut MonitorBackchannel,
 }
@@ -196,7 +203,7 @@ struct MonitorClosure<'a> {
 impl<'a> MonitorClosure<'a> {
     fn new(
         command_pid: ProcessId,
-        pty_follower: OwnedFd,
+        pty_follower: PtyFollower,
         errpipe_rx: UnixStream,
         backchannel: &'a mut MonitorBackchannel,
         dispatcher: &mut EventDispatcher<Self>,
