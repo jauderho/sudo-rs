@@ -300,9 +300,6 @@ fn match_command<'a>((cmd, args): (&'a Path, &'a [String])) -> (impl Fn(&Command
         ..glob::MatchOptions::new()
     };
     move |(cmdpat, argpat)| {
-        // use the canonicalized path (not using that is less permissive)
-        let realcmd = std::fs::canonicalize(cmd);
-        let cmd = realcmd.as_deref().unwrap_or(cmd);
         cmdpat.matches_path_with(cmd, opts)
             && argpat.as_ref().map_or(true, |vec| args == vec.as_ref())
     }
@@ -346,7 +343,7 @@ pub struct Settings {
     pub flags: HashSet<String>,
     pub str_value: HashMap<String, Option<Box<str>>>,
     pub enum_value: HashMap<String, TextEnum>,
-    pub int_value: HashMap<String, i128>,
+    pub int_value: HashMap<String, i64>,
     pub list: HashMap<String, HashSet<String>>,
 }
 

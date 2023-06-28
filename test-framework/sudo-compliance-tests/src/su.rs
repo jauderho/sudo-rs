@@ -2,10 +2,16 @@ use sudo_test::{Command, Env, User};
 
 use crate::{Result, PASSWORD, USERNAME};
 
+mod cli;
 mod env;
 mod flag_command;
+mod flag_group;
 mod flag_login;
+mod flag_preserve_environment;
+mod flag_pty;
 mod flag_shell;
+mod flag_supp_group;
+mod flag_whitelist_environment;
 
 #[test]
 fn default_target_is_root() -> Result<()> {
@@ -47,14 +53,13 @@ fn target_user_must_exist_in_passwd_db() -> Result<()> {
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
 
-
     let diagnostic = if sudo_test::is_original_sudo() {
         format!("user {USERNAME} does not exist or the user entry does not contain all the required fields")
     } else {
         format!("user '{USERNAME}' not found")
     };
 
-    assert_contains!(output.stderr(), diagnostic );
+    assert_contains!(output.stderr(), diagnostic);
 
     Ok(())
 }

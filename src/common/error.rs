@@ -3,6 +3,7 @@ use std::{fmt, path::PathBuf};
 
 #[derive(Debug)]
 pub enum Error {
+    CommandNotFound(PathBuf),
     InvalidCommand(PathBuf),
     UserNotFound(String),
     GroupNotFound(String),
@@ -10,21 +11,28 @@ pub enum Error {
     Configuration(String),
     Options(String),
     Pam(PamError),
-    IoError(std::io::Error),
+    IoError(Option<PathBuf>, std::io::Error),
     MaxAuthAttempts(usize),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidCommand(p) => write!(f, "'{p:?}': command not found"),
+            Error::CommandNotFound(p) => write!(f, "'{}': command not found", p.display()),
+            Error::InvalidCommand(p) => write!(f, "'{}': invalid command", p.display()),
             Error::UserNotFound(u) => write!(f, "user '{u}' not found"),
             Error::GroupNotFound(g) => write!(f, "group '{g}' not found"),
             Error::Authentication(e) => write!(f, "authentication failed: {e}"),
             Error::Configuration(e) => write!(f, "invalid configuration: {e}"),
-            Error::Options(e) => write!(f, "invalid options: {e}"),
+            Error::Options(e) => write!(f, "{e}"),
             Error::Pam(e) => write!(f, "PAM error: {e}"),
-            Error::IoError(e) => write!(f, "IO error: {e}"),
+            Error::IoError(location, e) => {
+                if let Some(path) = location {
+                    write!(f, "cannot execute '{}': {e}", path.display())
+                } else {
+                    write!(f, "IO error: {e}")
+                }
+            }
             Error::MaxAuthAttempts(num) => {
                 write!(f, "Maximum {num} incorrect authentication attempts")
             }
@@ -40,7 +48,7 @@ impl From<PamError> for Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Error::IoError(err)
+        Error::IoError(None, err)
     }
 }
 

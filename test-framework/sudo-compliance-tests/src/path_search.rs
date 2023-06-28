@@ -34,7 +34,7 @@ fn can_find_command_not_visible_to_regular_user() -> Result<()> {
 fn when_path_is_unset_does_not_search_in_default_path_set_for_command_execution() -> Result<()> {
     let path = "/usr/bin/my-script";
     let env = Env(SUDOERS_ALL_ALL_NOPASSWD)
-        .file(path, TextFile("#!/bin/sh"))
+        .file(path, TextFile("#!/bin/sh").chmod("777"))
         .build()?;
 
     let default_path = Command::new("sh")
@@ -57,7 +57,7 @@ fn when_path_is_unset_does_not_search_in_default_path_set_for_command_execution(
     if sudo_test::is_original_sudo() {
         assert_snapshot!(stderr);
     } else {
-        assert_contains!(stderr, "'\"my-script\"': command not found");
+        assert_contains!(stderr, "'my-script': command not found");
     }
 
     Ok(())

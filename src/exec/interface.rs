@@ -1,21 +1,27 @@
+use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
 use crate::common::{context::LaunchType, Context};
 use crate::system::{Group, User};
 
 pub trait RunOptions {
-    fn command(&self) -> &PathBuf;
+    fn command(&self) -> io::Result<&PathBuf>;
     fn arguments(&self) -> &Vec<String>;
     fn chdir(&self) -> Option<&PathBuf>;
     fn is_login(&self) -> bool;
     fn user(&self) -> &User;
+    fn requesting_user(&self) -> &User;
     fn group(&self) -> &Group;
     fn pid(&self) -> i32;
 }
 
 impl RunOptions for Context {
-    fn command(&self) -> &PathBuf {
-        &self.command.command
+    fn command(&self) -> io::Result<&PathBuf> {
+        if self.command.resolved {
+            Ok(&self.command.command)
+        } else {
+            Err(ErrorKind::NotFound.into())
+        }
     }
 
     fn arguments(&self) -> &Vec<String> {
@@ -32,6 +38,10 @@ impl RunOptions for Context {
 
     fn user(&self) -> &User {
         &self.target_user
+    }
+
+    fn requesting_user(&self) -> &User {
+        &self.current_user
     }
 
     fn group(&self) -> &Group {

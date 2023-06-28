@@ -2,23 +2,37 @@ use crate::common::error::Error;
 use crate::exec::{ExitReason, RunOptions};
 use crate::log::user_warn;
 use crate::pam::{CLIConverser, PamContext, PamError, PamErrorType};
+use crate::system::term::current_tty_name;
+
 use std::{env, process};
 
 use cli::{SuAction, SuOptions};
 use context::SuContext;
+use help::{long_help_message, USAGE_MSG};
 
 mod cli;
 mod context;
+mod help;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn authenticate(user: &str, login: bool) -> Result<PamContext<CLIConverser>, Error> {
+fn authenticate(
+    requesting_user: &str,
+    user: &str,
+    login: bool,
+) -> Result<PamContext<CLIConverser>, Error> {
     let context = if login { "su-l" } else { "su" };
     let use_stdin = true;
     let mut pam = PamContext::builder_cli("su", use_stdin, Default::default())
         .target_user(user)
         .service_name(context)
         .build()?;
+    pam.set_requesting_user(requesting_user)?;
+
+    // attempt to set the TTY this session is communicating on
+    if let Ok(pam_tty) = current_tty_name() {
+        pam.set_tty(&pam_tty)?;
+    }
 
     pam.mark_silent(true);
     pam.mark_allow_null_auth_token(false);
@@ -67,13 +81,23 @@ fn run(options: SuOptions) -> Result<(), Error> {
     let context = SuContext::from_env(options)?;
 
     // authenticate the target user
-    let mut pam = authenticate(&context.user().name, context.is_login())?;
+    let mut pam: PamContext<CLIConverser> = authenticate(
+        &context.requesting_user().name,
+        &context.user().name,
+        context.is_login(),
+    )?;
 
-    // run command and return corresponding exit code
-    let environment = context.environment.clone();
+    // su in all cases uses PAM (pam_getenvlist(3)) to do the
+    // final environment modification. Command-line options such as
+    // --login and --preserve-environment affect the environment before
+    // it is modified by PAM.
+    let mut environment = context.environment.clone();
+    environment.extend(pam.env()?);
+
     let pid = context.process.pid;
 
-    let (reason, emulate_default_handler) = crate::exec::run_command(context, environment)?;
+    // run command and return corresponding exit code
+    let (reason, emulate_default_handler) = crate::exec::run_command(&context, environment)?;
 
     // closing the pam session is best effort, if any error occurs we cannot
     // do anything with it
@@ -93,22 +117,39 @@ fn run(options: SuOptions) -> Result<(), Error> {
 }
 
 pub fn main() {
-    let su_options = SuOptions::from_env().unwrap();
+    crate::log::SudoLogger::new("su: ").into_global_logger();
+
+    let su_options = match SuOptions::from_env() {
+        Ok(options) => options,
+        Err(error) => {
+            println!("su: {error}\n{USAGE_MSG}");
+            std::process::exit(1);
+        }
+    };
 
     match su_options.action {
         SuAction::Help => {
-            println!("Usage: su [options] [-] [<user> [<argument>...]]");
+            println!("{}", long_help_message());
             std::process::exit(0);
         }
         SuAction::Version => {
             eprintln!("su-rs {VERSION}");
             std::process::exit(0);
         }
-        SuAction::Run => {
-            if let Err(error) = run(su_options) {
-                eprintln!("{error}");
+        SuAction::Run => match run(su_options) {
+            Err(Error::CommandNotFound(c)) => {
+                eprintln!("su: {}", Error::CommandNotFound(c));
+                std::process::exit(127);
+            }
+            Err(Error::InvalidCommand(c)) => {
+                eprintln!("su: {}", Error::InvalidCommand(c));
+                std::process::exit(126);
+            }
+            Err(error) => {
+                eprintln!("su: {error}");
                 std::process::exit(1);
             }
-        }
+            _ => {}
+        },
     };
 }
