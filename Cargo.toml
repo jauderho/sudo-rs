@@ -25,7 +25,7 @@ name = "su"
 path = "bin/su.rs"
 
 [dependencies]
-libc = "0.2.139"
+libc = "0.2.147"
 glob = "0.3.1"
 signal-hook = { version = "0.3.15", features = ["extended-siginfo"] }
 signal-hook-registry = "1.4.1"
