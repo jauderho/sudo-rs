@@ -1,8 +1,6 @@
-use std::{thread, time::Duration};
-
 use sudo_test::{Command, Env, User};
 
-use crate::{Result, PASSWORD, SUDO_RS_IS_UNSTABLE, USERNAME};
+use crate::{Result, PASSWORD, USERNAME};
 
 mod remove;
 mod reset;
@@ -134,7 +132,7 @@ fn cached_credential_not_shared_with_target_user_that_are_not_self() -> Result<(
     let output = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "echo {PASSWORD} | sudo -u {second_target_user} -S true; sudo -u {second_target_user} sh -c 'export \"{SUDO_RS_IS_UNSTABLE}\"; sudo -S true'"
+            "echo {PASSWORD} | sudo -u {second_target_user} -S true; sudo -u {second_target_user} sudo -S true"
         ))
         .as_user(USERNAME)
         .output(&env)?;
@@ -155,31 +153,41 @@ fn cached_credential_not_shared_with_target_user_that_are_not_self() -> Result<(
 }
 
 #[test]
-#[ignore = "gh388"]
-fn cached_credential_shared_with_target_user_that_is_self() -> Result<()> {
-    let env = Env(format!("{USERNAME} ALL=(ALL:ALL) ALL"))
+fn cached_credential_shared_with_target_user_that_is_self_on_the_same_tty() -> Result<()> {
+    let env = Env(["Defaults !use_pty".to_string(), format!("{USERNAME} ALL=(ALL:ALL) ALL")])
         .user(User(USERNAME).password(PASSWORD))
         .build()?;
 
-    // FIXME switch back to `exec.assert_success`. this operation makes sudo-rs hang so we use
-    // `spawn` + `try_wait` polling here to avoid blocking forever
-    let mut child = Command::new("sh")
+    Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "echo {PASSWORD} | sudo -S true; sudo -u {USERNAME} env '{SUDO_RS_IS_UNSTABLE}' sudo true"
+            "echo {PASSWORD} | sudo -S true; sudo -u {USERNAME} sudo -n true"
         ))
         .as_user(USERNAME)
         .tty(true)
-        .spawn(&env)?;
+        .output(&env)?
+        .assert_success()?;
 
-    for _ in 0..5 {
-        if let Some(status) = child.try_wait()? {
-            assert!(status.success());
-            return Ok(());
-        }
+    Ok(())
+}
 
-        thread::sleep(Duration::from_secs(1));
-    }
+#[test]
+fn cached_credential_not_shared_with_self_across_ttys() -> Result<()> {
+    let env = Env(["Defaults use_pty".to_string(), format!("{USERNAME} ALL=(ALL:ALL) ALL")])
+        .user(User(USERNAME).password(PASSWORD))
+        .build()?;
 
-    panic!("timed out")
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "echo {PASSWORD} | sudo -S true; sudo -u {USERNAME} sudo -n true"
+        ))
+        .as_user(USERNAME)
+        .tty(true)
+        .output(&env)?;
+
+    assert!(!output.status().success());
+    assert_eq!(Some(1), output.status().code());
+
+    Ok(())
 }
