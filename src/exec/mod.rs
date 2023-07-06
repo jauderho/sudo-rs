@@ -1,5 +1,3 @@
-#![deny(unsafe_code)]
-
 mod event;
 mod interface;
 mod io_util;
@@ -16,14 +14,13 @@ use std::{
     time::Duration,
 };
 
-use signal_hook::consts::*;
-
 use crate::{
     common::Environment,
     log::dev_warn,
     system::{
         interface::ProcessId,
         killpg,
+        signal::{consts::*, signal_name},
         wait::{Wait, WaitError, WaitOptions},
     },
 };
@@ -81,7 +78,6 @@ pub fn run_command(
     if let Some(path) = path {
         let is_chdir = options.chdir().is_some();
 
-        #[allow(unsafe_code)]
         unsafe {
             command.pre_exec(move || {
                 let bytes = path.as_os_str().as_bytes();
@@ -152,12 +148,12 @@ fn handle_sigchld<T: HandleSigchld>(
             // This only happens if we receive `SIGCHLD` but there's no status update from the
             // monitor.
             Err(WaitError::Io(err)) => {
-                dev_info!("cannot wait for {child_pid} ({child_name}): {err}")
+                return dev_info!("cannot wait for {child_pid} ({child_name}): {err}");
             }
             // This only happens if the monitor exited and any process already waited for the
             // monitor.
             Err(WaitError::NotReady) => {
-                dev_info!("{child_pid} ({child_name}) has no status report")
+                return dev_info!("{child_pid} ({child_name}) has no status report");
             }
             Ok((_pid, status)) => break status,
         }
@@ -185,11 +181,14 @@ fn handle_sigchld<T: HandleSigchld>(
 }
 
 fn signal_fmt(signal: SignalNumber) -> Cow<'static, str> {
-    signal_hook::low_level::signal_name(signal)
-        .or_else(|| (signal == SIGCONT_FG).then_some("SIGCONT_FG"))
-        .or_else(|| (signal == SIGCONT_BG).then_some("SIGCONT_BG"))
-        .map(|name| name.into())
-        .unwrap_or_else(|| format!("unknown signal #{}", signal).into())
+    match signal_name(signal) {
+        name @ Cow::Owned(_) => match signal {
+            SIGCONT_BG => "SIGCONT_BG".into(),
+            SIGCONT_FG => "SIGCONT_FG".into(),
+            _ => name,
+        },
+        name => name,
+    }
 }
 
 const fn cond_fmt<'a>(cond: bool, true_s: &'a str, false_s: &'a str) -> &'a str {
