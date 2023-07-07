@@ -19,7 +19,7 @@ use libc::{
     TIOCGWINSZ, TIOCSWINSZ, TOSTOP,
 };
 
-use super::Terminal;
+use super::{TermSize, Terminal};
 use crate::{cutils::cerr, system::interface::ProcessId};
 
 const INPUT_FLAGS: tcflag_t = IGNPAR
@@ -114,6 +114,20 @@ impl UserTerm {
             original_termios: MaybeUninit::uninit(),
             changed: false,
         })
+    }
+
+    pub(crate) fn get_size(&self) -> io::Result<TermSize> {
+        let mut term_size = MaybeUninit::<TermSize>::uninit();
+
+        cerr(unsafe {
+            ioctl(
+                self.tty.as_raw_fd(),
+                TIOCGWINSZ,
+                term_size.as_mut_ptr().cast::<winsize>(),
+            )
+        })?;
+
+        Ok(unsafe { term_size.assume_init() })
     }
 
     /// Copy the settings of the user's terminal to the `dst` terminal.

@@ -1,15 +1,15 @@
 mod user_term;
 
 use std::{
-    ffi::{c_uchar, CStr, CString, OsStr, OsString},
+    ffi::{c_uchar, CString, OsString},
+    fmt,
     fs::File,
     io,
-    os::{
-        fd::{AsRawFd, FromRawFd, OwnedFd},
-        unix::prelude::OsStrExt,
-    },
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     ptr::null_mut,
 };
+
+use libc::{ioctl, winsize, TIOCSWINSZ};
 
 use crate::cutils::{cerr, os_string_from_ptr, safe_isatty};
 
@@ -71,6 +71,20 @@ impl Pty {
 
 pub(crate) struct PtyLeader {
     file: File,
+}
+
+impl PtyLeader {
+    pub(crate) fn set_size(&self, term_size: &TermSize) -> io::Result<()> {
+        cerr(unsafe {
+            ioctl(
+                self.file.as_raw_fd(),
+                TIOCSWINSZ,
+                (term_size as *const TermSize).cast::<libc::winsize>(),
+            )
+        })?;
+
+        Ok(())
+    }
 }
 
 impl io::Read for PtyLeader {
@@ -151,8 +165,6 @@ impl<F: AsRawFd> Terminal for F {
 
     /// Get the filename of the tty
     fn ttyname(&self) -> io::Result<OsString> {
-        use std::os::unix::ffi::OsStringExt;
-
         let mut buf: [libc::c_char; 1024] = [0; 1024];
 
         if !safe_isatty(self.as_raw_fd()) {
@@ -172,6 +184,23 @@ impl<F: AsRawFd> Terminal for F {
 /// Try to get the path of the current TTY
 pub fn current_tty_name() -> io::Result<OsString> {
     std::io::stdin().ttyname()
+}
+
+#[repr(transparent)]
+pub(crate) struct TermSize {
+    raw: winsize,
+}
+
+impl PartialEq for TermSize {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw.ws_col == other.raw.ws_col && self.raw.ws_row == other.raw.ws_row
+    }
+}
+
+impl fmt::Display for TermSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} x {}", self.raw.ws_row, self.raw.ws_col)
+    }
 }
 
 #[cfg(test)]
@@ -202,7 +231,7 @@ mod tests {
         // Create a socket so the child can send us a byte if successful.
         let (mut rx, mut tx) = UnixStream::pair().unwrap();
 
-        let ForkResult::Parent(child_pid) = fork().unwrap() else {
+        let ForkResult::Parent(_) = fork().unwrap() else {
             // Open a new pseudoterminal.
             let leader = Pty::open().unwrap().leader;
             // The pty leader should not have a foreground process group yet.

@@ -1,9 +1,7 @@
 // TODO: remove unused attribute when system is cleaned up
-#![allow(unused)]
 use std::{
     collections::BTreeSet,
-    ffi::{c_int, c_uint, CStr, CString},
-    fs::OpenOptions,
+    ffi::{c_uint, CStr, CString},
     io,
     mem::MaybeUninit,
     os::fd::AsRawFd,
@@ -35,6 +33,10 @@ pub mod signal;
 pub mod term;
 
 pub mod wait;
+
+pub(crate) fn _exit(status: libc::c_int) -> ! {
+    unsafe { libc::_exit(status) }
+}
 
 /// A type able to close every file descriptor except for the ones pased via [`FileCloser::except`]
 /// and the IO streams.
@@ -155,9 +157,15 @@ pub fn hostname() -> String {
 }
 
 pub fn syslog(priority: libc::c_int, facility: libc::c_int, message: &str) {
-    let msg = CString::new(message).unwrap();
+    const MSG: *const libc::c_char = match CStr::from_bytes_until_nul(b"%s\0") {
+        Ok(cstr) => cstr.as_ptr(),
+        Err(_) => panic!("syslog formatting string is not null-terminated"),
+    };
+
+    let msg = CString::new(message).expect("message should not have interior null bytes");
+
     unsafe {
-        libc::syslog(priority | facility, msg.as_ptr());
+        libc::syslog(priority | facility, MSG, msg.as_ptr());
     }
 }
 
@@ -319,10 +327,6 @@ impl User {
         unsafe { libc::geteuid() }
     }
 
-    pub fn effective() -> std::io::Result<Option<User>> {
-        Self::from_uid(Self::effective_uid())
-    }
-
     pub fn real_uid() -> UserId {
         unsafe { libc::getuid() }
     }
@@ -389,22 +393,6 @@ impl Group {
             passwd: string_from_ptr(grp.gr_passwd),
             members,
         }
-    }
-
-    pub fn effective_gid() -> GroupId {
-        unsafe { libc::getegid() }
-    }
-
-    pub fn effective() -> std::io::Result<Option<Group>> {
-        Self::from_gid(Self::effective_gid())
-    }
-
-    pub fn real_gid() -> UserId {
-        unsafe { libc::getgid() }
-    }
-
-    pub fn real() -> std::io::Result<Option<Group>> {
-        Self::from_gid(Self::real_gid())
     }
 
     pub fn from_gid(gid: GroupId) -> std::io::Result<Option<Group>> {
