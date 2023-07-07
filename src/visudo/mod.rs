@@ -1,7 +1,8 @@
 use std::{
-    fs::{File, OpenOptions},
-    io::{self, BufRead, Read, Seek, Write},
-    path::Path,
+    fs::{File, Permissions},
+    io::{self, BufRead, IsTerminal, Read, Seek, Write},
+    os::unix::prelude::PermissionsExt,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -19,40 +20,75 @@ pub fn main() {
 
 fn visudo_process() -> io::Result<()> {
     let sudoers_path = Path::new("/etc/sudoers");
-    let mut sudoers_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(sudoers_path)?;
 
-    sudoers_file.lock_exclusive()?;
+    let (mut sudoers_file, existed) = if sudoers_path.exists() {
+        let file = File::options().read(true).write(true).open(sudoers_path)?;
+        (file, true)
+    } else {
+        // Create a sudoers file if it doesn't exist and set the permissions so it can only be read
+        // by the root user and group.
+        let file = File::create(sudoers_path)?;
+        file.set_permissions(Permissions::from_mode(0o440))?;
+        (file, false)
+    };
+
+    sudoers_file.lock_exclusive(true).map_err(|err| {
+        if err.kind() == io::ErrorKind::WouldBlock {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!("{} busy, try again later", sudoers_path.display()),
+            )
+        } else {
+            err
+        }
+    })?;
 
     let result: io::Result<()> = (|| {
         let tmp_path = sudoers_path.with_extension("tmp");
 
-        let mut buf = Vec::new();
-        sudoers_file.read_to_end(&mut buf)?;
+        let mut tmp_file = File::create(&tmp_path)?;
+        tmp_file.set_permissions(Permissions::from_mode(0o700))?;
 
-        File::create(&tmp_path)?.write_all(&buf)?;
+        let mut sudoers_contents = Vec::new();
+        if existed {
+            // If the sudoers file existed, read its contents and write them into the temporary file.
+            sudoers_file.read_to_end(&mut sudoers_contents)?;
+            // Rewind the sudoers file so it can be written later.
+            sudoers_file.rewind()?;
+            tmp_file.write_all(&sudoers_contents)?;
+        }
+
+        let editor_path = solve_editor_path()?;
 
         loop {
-            Command::new("vi")
+            Command::new(&editor_path)
+                .arg("--")
                 .arg(&tmp_path)
                 .spawn()?
                 .wait_with_output()?;
 
-            let (_sudoers, errors) = Sudoers::new(&tmp_path)?;
+            let (_sudoers, errors) = Sudoers::new(&tmp_path).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "unable to re-open temporary file ({}), {} unchanged",
+                        tmp_path.display(),
+                        sudoers_path.display()
+                    ),
+                )
+            })?;
 
             if errors.is_empty() {
                 break;
             }
 
-            println!("Come on... you can do better than that.\n");
+            eprintln!("Come on... you can do better than that.\n");
 
             for crate::sudoers::Error(_position, message) in errors {
-                println!("\t{message}");
+                eprintln!("syntax error: {message}");
             }
 
-            println!();
+            eprintln!();
 
             let stdin = io::stdin();
             let stdout = io::stdout();
@@ -65,21 +101,27 @@ fn visudo_process() -> io::Result<()> {
                     .write_all("What now? e(x)it without saving / (e)dit again: ".as_bytes())?;
                 stdout_handle.flush()?;
 
-                let mut input = String::new();
-                stdin_handle.read_line(&mut input)?;
+                let mut input = [0u8];
+                if let Err(err) = stdin_handle.read_exact(&mut input) {
+                    eprintln!("visudo: cannot read user input: {err}");
+                    return Ok(());
+                }
 
-                match input.trim_end() {
-                    "e" => break,
-                    "x" => return Ok(()),
-                    input => println!("Invalid option: {input:?}\n"),
+                match &input {
+                    b"e" => break,
+                    b"x" => return Ok(()),
+                    input => println!("Invalid option: {:?}\n", std::str::from_utf8(input)),
                 }
             }
         }
 
-        sudoers_file.rewind()?;
-
-        let buf = std::fs::read(&tmp_path)?;
-        sudoers_file.write_all(&buf)?;
+        let tmp_contents = std::fs::read(&tmp_path)?;
+        // Only write to the sudoers file if the contents changed.
+        if tmp_contents == sudoers_contents {
+            eprintln!("visudo: {} unchanged", tmp_path.display());
+        } else {
+            sudoers_file.write_all(&tmp_contents)?;
+        }
 
         Ok(())
     })();
@@ -89,4 +131,30 @@ fn visudo_process() -> io::Result<()> {
     result?;
 
     Ok(())
+}
+
+fn solve_editor_path() -> io::Result<PathBuf> {
+    let path = Path::new("/usr/bin/editor");
+    if path.exists() {
+        return Ok(path.to_owned());
+    }
+
+    for key in ["SUDO_EDITOR", "VISUAL", "EDITOR"] {
+        if let Some(var) = std::env::var_os(key) {
+            let path = Path::new(&var);
+            if path.exists() {
+                return Ok(path.to_owned());
+            }
+        }
+    }
+
+    let path = Path::new("/usr/bin/vi");
+    if path.exists() {
+        return Ok(path.to_owned());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "cannot find text editor",
+    ))
 }

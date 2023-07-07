@@ -18,7 +18,6 @@ const EDITOR_TRUE: &str = "#!/bin/sh
 true";
 
 #[test]
-#[ignore = "gh657"]
 fn default_editor_is_usr_bin_editor() -> Result<()> {
     let expected = "default editor was called";
     let env = Env("")
@@ -43,7 +42,6 @@ echo '{expected}' > {LOGS_PATH}"
 }
 
 #[test]
-#[ignore = "gh657"]
 fn creates_sudoers_file_with_default_ownership_and_perms_if_it_doesnt_exist() -> Result<()> {
     let env = Env("")
         .file(DEFAULT_EDITOR, TextFile(EDITOR_TRUE).chmod(CHMOD_EXEC))
@@ -67,7 +65,6 @@ fn creates_sudoers_file_with_default_ownership_and_perms_if_it_doesnt_exist() ->
 }
 
 #[test]
-#[ignore = "gh657"]
 fn errors_if_currently_being_edited() -> Result<()> {
     let env = Env("")
         .file(
@@ -100,7 +97,6 @@ sleep 3",
 }
 
 #[test]
-#[ignore = "gh657"]
 fn passes_temporary_file_to_editor() -> Result<()> {
     let env = Env("")
         .file(
@@ -123,7 +119,6 @@ echo "$@" > {LOGS_PATH}"#
 }
 
 #[test]
-#[ignore = "gh657"]
 fn temporary_file_owner_and_perms() -> Result<()> {
     let env = Env("")
         .file(
@@ -146,7 +141,6 @@ ls -l /etc/sudoers.tmp > {LOGS_PATH}"#
 }
 
 #[test]
-#[ignore = "gh657"]
 fn saves_file_if_no_syntax_errors() -> Result<()> {
     let expected = SUDOERS_ALL_ALL_NOPASSWD;
     let env = Env("")
@@ -178,7 +172,6 @@ echo '{expected}' >> $2"#
 }
 
 #[test]
-#[ignore = "gh657"]
 fn stderr_message_when_file_is_not_modified() -> Result<()> {
     let expected = SUDOERS_ALL_ALL_NOPASSWD;
     let env = Env(expected)
@@ -201,7 +194,6 @@ fn stderr_message_when_file_is_not_modified() -> Result<()> {
 }
 
 #[test]
-#[ignore = "gh657"]
 fn does_not_save_the_file_if_there_are_syntax_errors() -> Result<()> {
     let expected = SUDOERS_ALL_ALL_NOPASSWD;
     let env = Env(expected)
@@ -260,7 +252,6 @@ exit 11",
 }
 
 #[test]
-#[ignore = "gh657"]
 fn temporary_file_is_deleted_during_edition() -> Result<()> {
     let env = Env("")
         .file(
