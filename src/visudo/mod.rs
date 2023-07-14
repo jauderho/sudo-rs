@@ -5,14 +5,20 @@ use std::{
     ffi::{CStr, CString, OsString},
     fs::{File, Permissions},
     io::{self, Read, Seek, Write},
-    os::unix::prelude::{OsStringExt, PermissionsExt},
+    os::unix::prelude::{MetadataExt, OsStringExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
 };
 
-use crate::{sudoers::Sudoers, system::file::Lockable};
+use crate::{
+    sudoers::Sudoers,
+    system::{
+        file::{Chown, Lockable},
+        User,
+    },
+};
 
-use self::cli::VisudoOptions;
+use self::cli::{VisudoAction, VisudoOptions};
 use self::help::{long_help_message, USAGE_MSG};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,45 +38,94 @@ pub fn main() {
         }
     };
 
-    match options.action {
-        cli::VisudoAction::Help => {
+    let cmd = match options.action {
+        VisudoAction::Help => {
             println!("{}", long_help_message());
             std::process::exit(0);
         }
-        cli::VisudoAction::Version => {
+        VisudoAction::Version => {
             println!("visudo version {VERSION}");
             std::process::exit(0);
         }
-        cli::VisudoAction::Check => {
-            eprintln!("check is unimplemented");
+        VisudoAction::Check => check,
+        VisudoAction::Run => run,
+    };
+
+    match cmd(options.file.as_deref(), options.perms, options.owner) {
+        Ok(()) => {}
+        Err(error) => {
+            eprintln!("visudo: {error}");
             std::process::exit(1);
         }
-        cli::VisudoAction::Run => match run_visudo(options.file.as_deref()) {
-            Ok(()) => {}
-            Err(error) => {
-                eprintln!("visudo: {error}");
-                std::process::exit(1);
-            }
-        },
     }
 }
 
-fn run_visudo(file_arg: Option<&str>) -> io::Result<()> {
+fn check(file_arg: Option<&str>, perms: bool, owner: bool) -> io::Result<()> {
+    let sudoers_path = Path::new(file_arg.unwrap_or("/etc/sudoers"));
+
+    let sudoers_file = File::open(sudoers_path)
+        .map_err(|err| io_msg!(err, "unable to open {}", sudoers_path.display()))?;
+
+    let metadata = sudoers_file.metadata()?;
+
+    if file_arg.is_none() || perms {
+        // For some reason, the MSB of the mode is on so we need to mask it.
+        let mode = metadata.permissions().mode() & 0o777;
+
+        if mode != 0o440 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "{}: bad permissions, should be mode 0440, but found {mode:04o}",
+                    sudoers_path.display()
+                ),
+            ));
+        }
+    }
+
+    if file_arg.is_none() || owner {
+        let owner = (metadata.uid(), metadata.gid());
+
+        if owner != (0, 0) {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "{}: wrong owner (uid, gid) should be (0, 0), but found {owner:?}",
+                    sudoers_path.display()
+                ),
+            ));
+        }
+    }
+
+    let (_sudoers, errors) = Sudoers::read(&sudoers_file, &sudoers_path)?;
+
+    if errors.is_empty() {
+        println!("{}: parsed OK", sudoers_path.display());
+        return Ok(());
+    }
+
+    for crate::sudoers::Error(_position, message) in errors {
+        eprintln!("syntax error: {message}");
+    }
+
+    Err(io::Error::new(io::ErrorKind::Other, "invalid sudoers file"))
+}
+
+fn run(file_arg: Option<&str>, perms: bool, owner: bool) -> io::Result<()> {
     let sudoers_path = Path::new(file_arg.unwrap_or("/etc/sudoers"));
 
     let (mut sudoers_file, existed) = if sudoers_path.exists() {
         let file = File::options().read(true).write(true).open(sudoers_path)?;
+
         (file, true)
     } else {
         // Create a sudoers file if it doesn't exist.
         let file = File::create(sudoers_path)?;
-        // ogvisudo sets the permissions of the file based on whether the `-f` argument was passed
-        // or not:
-        // - If `-f` was passed, the file can be read and written by the user.
-        // - If `-f` was not passed, the file can only be read by the user.
-        // In both cases, the file can be read by the group.
-        let mode = if file_arg.is_some() { 0o640 } else { 0o440 };
-        file.set_permissions(Permissions::from_mode(mode))?;
+        // ogvisudo sets the permissions of the file so it can be read and written by the user and
+        // read by the group if the `-f` argument was passed.
+        if file_arg.is_some() {
+            file.set_permissions(Permissions::from_mode(0o640))?;
+        }
         (file, false)
     };
 
@@ -83,6 +138,14 @@ fn run_visudo(file_arg: Option<&str>) -> io::Result<()> {
     })?;
 
     let result: io::Result<()> = (|| {
+        if perms || file_arg.is_none() {
+            sudoers_file.set_permissions(Permissions::from_mode(0o440))?;
+        }
+
+        if owner || file_arg.is_none() {
+            sudoers_file.chown(User::real_uid(), User::real_gid())?;
+        }
+
         let tmp_path = create_temporary_dir()?.join("sudoers");
 
         let mut tmp_file = File::options()

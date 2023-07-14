@@ -6,7 +6,6 @@ use crate::{
 };
 
 #[test]
-#[ignore = "gh657"]
 fn when_present_changes_perms_of_existing_file() -> Result<()> {
     let file_path = TMP_SUDOERS;
     let env = Env("")
@@ -53,7 +52,6 @@ fn when_absent_perms_are_preserved() -> Result<()> {
 }
 
 #[test]
-#[ignore = "gh657"]
 fn etc_sudoers_perms_are_always_changed() -> Result<()> {
     let file_path = ETC_SUDOERS;
     let env = Env(TextFile("").chmod("777"))
@@ -73,7 +71,6 @@ fn etc_sudoers_perms_are_always_changed() -> Result<()> {
 }
 
 #[test]
-#[ignore = "gh657"]
 fn flag_check() -> Result<()> {
     let file_path = TMP_SUDOERS;
     let env = Env("")
@@ -91,9 +88,9 @@ fn flag_check() -> Result<()> {
 
     assert!(!output.status().success());
     assert_eq!(Some(1), output.status().code());
-    assert_eq!(
-        format!("{file_path}: bad permissions, should be mode 0440"),
+    assert_contains!(
         output.stderr(),
+        format!("{file_path}: bad permissions, should be mode 0440")
     );
 
     Ok(())
