@@ -4,7 +4,10 @@ use std::{
     ffi::{c_uint, CStr, CString},
     io,
     mem::MaybeUninit,
-    os::{fd::AsRawFd, unix::prelude::OsStrExt},
+    os::{
+        fd::AsRawFd,
+        unix::{self, prelude::OsStrExt},
+    },
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -235,10 +238,6 @@ pub fn getpgid(pid: ProcessId) -> io::Result<ProcessId> {
 /// Set a process group ID.
 pub fn setpgid(pid: ProcessId, pgid: ProcessId) -> io::Result<()> {
     cerr(unsafe { libc::setpgid(pid, pgid) }).map(|_| ())
-}
-
-pub fn chdir<S: AsRef<CStr>>(path: &S) -> io::Result<()> {
-    cerr(unsafe { libc::chdir(path.as_ref().as_ptr()) }).map(|_| ())
 }
 
 pub fn chown<S: AsRef<CStr>>(
@@ -499,12 +498,16 @@ impl Process {
 
     /// Return the process identifier for the current process
     pub fn process_id() -> ProcessId {
-        unsafe { libc::getpid() }
+        // NOTE libstd casts the `i32` that `libc::getpid` returns into `u32`
+        // here we cast it back into `i32` (`ProcessId`)
+        std::process::id() as ProcessId
     }
 
     /// Return the parent process identifier for the current process
     pub fn parent_id() -> Option<ProcessId> {
-        let pid = unsafe { libc::getppid() };
+        // NOTE libstd casts the `i32` that `libc::getppid` returns into `u32`
+        // here we cast it back into `i32` (`ProcessId`)
+        let pid = unix::process::parent_id() as ProcessId;
         if pid == 0 {
             None
         } else {

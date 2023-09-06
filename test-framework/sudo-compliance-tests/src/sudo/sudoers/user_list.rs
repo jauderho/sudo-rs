@@ -407,3 +407,24 @@ fn user_alias_keywords() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn null_byte_terminated_username() -> Result<()> {
+    let env = Env("ferris\0 ALL=(ALL:ALL) NOPASSWD: ALL")
+        .user("ferris")
+        .build()?;
+
+    let output = Command::new("sudo")
+        .arg("true")
+        .as_user("ferris")
+        .output(&env)?;
+
+    assert!(!output.status().success());
+    if sudo_test::is_original_sudo() {
+        assert_contains!(output.stderr(), "syntax error");
+    } else {
+        assert_contains!(output.stderr(), "expected host name");
+    }
+
+    Ok(())
+}
