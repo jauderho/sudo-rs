@@ -1,6 +1,7 @@
 use super::ast_names::UserFriendly;
 use super::basic_parser::*;
 use super::tokens::*;
+use crate::common::SudoString;
 use crate::common::{
     HARDENED_ENUM_VALUE_0, HARDENED_ENUM_VALUE_1, HARDENED_ENUM_VALUE_2, HARDENED_ENUM_VALUE_3,
     HARDENED_ENUM_VALUE_4,
@@ -28,6 +29,15 @@ impl<T> Qualified<T> {
             Qualified::Forbid(item) => Qualified::Allow(item),
         }
     }
+
+    #[cfg(test)]
+    pub fn as_allow(&self) -> Option<&T> {
+        if let Self::Allow(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 /// Type aliases; many items can be replaced by ALL, aliases, and negated.
@@ -37,7 +47,7 @@ pub type SpecList<T> = Vec<Spec<T>>;
 /// An identifier is a name or a #number
 #[cfg_attr(test, derive(Clone, Debug, PartialEq, Eq))]
 pub enum Identifier {
-    Name(String),
+    Name(SudoString),
     ID(u32),
 }
 
@@ -133,6 +143,51 @@ pub enum Sudo {
     LineComment = HARDENED_ENUM_VALUE_4,
 }
 
+impl Sudo {
+    #[cfg(test)]
+    pub fn is_spec(&self) -> bool {
+        matches!(self, Self::Spec(..))
+    }
+
+    #[cfg(test)]
+    pub fn is_decl(&self) -> bool {
+        matches!(self, Self::Decl(..))
+    }
+
+    #[cfg(test)]
+    pub fn is_line_comment(&self) -> bool {
+        matches!(self, Self::LineComment)
+    }
+
+    #[cfg(test)]
+    pub fn is_include(&self) -> bool {
+        matches!(self, Self::Include(..))
+    }
+
+    #[cfg(test)]
+    pub fn is_include_dir(&self) -> bool {
+        matches!(self, Self::IncludeDir(..))
+    }
+
+    #[cfg(test)]
+    pub fn as_include(&self) -> &str {
+        if let Self::Include(v) = self {
+            v
+        } else {
+            panic!()
+        }
+    }
+
+    #[cfg(test)]
+    pub fn as_spec(&self) -> Option<&PermissionSpec> {
+        if let Self::Spec(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
 /// grammar:
 /// ```text
 /// identifier = name
@@ -190,7 +245,7 @@ impl<T: Many> Many for Qualified<T> {
 
 fn parse_meta<T: Parse>(
     stream: &mut impl CharStream,
-    embed: impl FnOnce(String) -> T,
+    embed: impl FnOnce(SudoString) -> T,
 ) -> Parsed<Meta<T>> {
     if let Some(meta) = try_nonterminal(stream)? {
         make(match meta {

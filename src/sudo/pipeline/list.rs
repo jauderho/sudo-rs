@@ -1,10 +1,9 @@
 use std::{borrow::Cow, ops::ControlFlow, path::Path};
 
 use crate::{
-    cli::{SudoAction, SudoOptions},
     common::{Context, Error},
     pam::CLIConverser,
-    sudo::{pam::PamAuthenticator, SudoersPolicy},
+    sudo::{cli::SudoListOptions, pam::PamAuthenticator, SudoersPolicy},
     sudoers::{Authorization, ListRequest, Policy, Request, Sudoers},
     system::User,
 };
@@ -12,24 +11,21 @@ use crate::{
 use super::{Pipeline, PolicyPlugin};
 
 impl Pipeline<SudoersPolicy, PamAuthenticator<CLIConverser>> {
-    pub(in crate::sudo) fn run_list(mut self, cmd_opts: SudoOptions) -> Result<(), Error> {
-        let verbose_list_mode = cmd_opts.verbose_list_mode();
+    pub(in crate::sudo) fn run_list(mut self, cmd_opts: SudoListOptions) -> Result<(), Error> {
+        let verbose_list_mode = cmd_opts.list.is_verbose();
         let other_user = cmd_opts
             .other_user
             .as_ref()
             .map(|username| {
-                User::from_name(username)?.ok_or_else(|| Error::UserNotFound(username.clone()))
+                User::from_name(username.as_cstr())?
+                    .ok_or_else(|| Error::UserNotFound(username.clone().into()))
             })
             .transpose()?;
 
-        let original_command = if let SudoAction::List(args) = &cmd_opts.action {
-            args.first().cloned()
-        } else {
-            panic!("called `Pipeline::run_list` with a SudoAction other than `List`")
-        };
+        let original_command = cmd_opts.positional_args.first().cloned();
 
         let sudoers = self.policy.init()?;
-        let context = super::build_context(cmd_opts, &sudoers)?;
+        let context = super::build_context(cmd_opts.into(), &sudoers)?;
 
         if original_command.is_some() && !context.command.resolved {
             return Err(Error::CommandNotFound(context.command.command));
