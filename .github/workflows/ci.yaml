@@ -19,7 +19,7 @@ jobs:
       SUDO_TEST_VERBOSE_DOCKER_BUILD: 1
       CI: true
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -59,7 +59,7 @@ jobs:
       SUDO_TEST_VERBOSE_DOCKER_BUILD: 1
       CI: true
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -105,7 +105,7 @@ jobs:
       SUDO_TEST_VERBOSE_DOCKER_BUILD: 1
       CI: true
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -154,7 +154,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -186,7 +186,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Set rust nightly version
         run: echo "NIGHTLY_VERSION=$(curl https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/rustc)" >> $GITHUB_ENV
@@ -277,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -313,7 +313,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Set rust nightly version
         run: echo "NIGHTLY_VERSION=$(curl https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)" >> $GITHUB_ENV
@@ -348,7 +348,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -375,7 +375,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -409,7 +409,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
@@ -439,7 +439,7 @@ jobs:
     needs: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install rust
         uses: actions-rs/toolchain@v1
