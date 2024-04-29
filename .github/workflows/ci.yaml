@@ -31,7 +31,7 @@ jobs:
         run: docker buildx create --name builder --use
 
       - name: cache docker layers
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
           key: docker-buildx-rs-${{ github.sha }}
@@ -71,7 +71,7 @@ jobs:
         run: docker buildx create --name builder --use
 
       - name: cache docker layers
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
           key: docker-buildx-og-${{ github.sha }}
@@ -117,7 +117,7 @@ jobs:
         run: docker buildx create --name builder --use
 
       - name: cache docker layers
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
           key: docker-buildx-rs-${{ github.sha }}
