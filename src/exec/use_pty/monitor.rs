@@ -199,9 +199,9 @@ fn exec_command(
     original_set: Option<SignalSet>,
 ) -> io::Error {
     // FIXME (ogsudo): Do any additional configuration that needs to be run after `fork` but before `exec`
-    let command_pid = std::process::id() as ProcessId;
+    let command_pid = ProcessId::new(std::process::id() as i32);
 
-    setpgid(0, command_pid).ok();
+    setpgid(ProcessId::new(0), command_pid).ok();
 
     // Wait for the monitor to set us as the foreground group for the pty if we are in the
     // foreground.
@@ -381,12 +381,7 @@ impl<'a> MonitorClosure<'a> {
             }
         };
 
-        dev_info!(
-            "monitor received{} {} from {}",
-            opt_fmt(info.is_user_signaled(), " user signaled"),
-            info.signal(),
-            info.pid()
-        );
+        dev_info!("monitor received{}", info);
 
         // Don't do anything if the command has terminated already
         let Some(command_pid) = self.command_pid else {
@@ -396,10 +391,16 @@ impl<'a> MonitorClosure<'a> {
 
         match info.signal() {
             SIGCHLD => handle_sigchld(self, registry, "command", command_pid),
-            // Skip the signal if it was sent by the user and it is self-terminating.
-            _ if info.is_user_signaled()
-                && is_self_terminating(info.pid(), command_pid, self.command_pgrp) => {}
-            signal => self.send_signal(signal, command_pid, false),
+            signal => {
+                if let Some(pid) = info.signaler_pid() {
+                    if is_self_terminating(pid, command_pid, self.command_pgrp) {
+                        // Skip the signal if it was sent by the user and it is self-terminating.
+                        return;
+                    }
+                }
+
+                self.send_signal(signal, command_pid, false)
+            }
         }
     }
 }
@@ -414,7 +415,7 @@ fn is_self_terminating(
     command_pid: ProcessId,
     command_pgrp: ProcessId,
 ) -> bool {
-    if signaler_pid != 0 {
+    if signaler_pid.is_valid() {
         if signaler_pid == command_pid {
             return true;
         }
