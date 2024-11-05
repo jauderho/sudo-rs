@@ -16,8 +16,13 @@ mod error;
 mod rpassword;
 mod securemem;
 
+#[cfg_attr(target_os = "linux", path = "sys_linuxpam.rs")]
+#[cfg_attr(target_os = "freebsd", path = "sys_openpam.rs")]
 #[allow(nonstandard_style)]
 pub mod sys;
+
+#[cfg(target_os = "freebsd")]
+const PAM_DATA_SILENT: std::ffi::c_int = 0;
 
 pub use converse::{CLIConverser, Converser};
 

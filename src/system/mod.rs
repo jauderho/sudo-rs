@@ -1,5 +1,7 @@
 use core::fmt;
 // TODO: remove unused attribute when system is cleaned up
+#[cfg(target_os = "linux")]
+use std::str::FromStr;
 use std::{
     collections::BTreeSet,
     ffi::{c_uint, CStr, CString},
@@ -11,7 +13,6 @@ use std::{
         unix::{self, prelude::OsStrExt},
     },
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
 use crate::{
@@ -147,18 +148,32 @@ pub(crate) unsafe fn fork() -> io::Result<ForkResult> {
 /// In a multithreaded program, only async-signal-safe functions are guaranteed to work in the
 /// child process until a call to `execve` or a similar function is done.
 #[cfg(test)]
-unsafe fn fork_for_test() -> ForkResult {
-    let result = fork().unwrap();
-    if let ForkResult::Child = result {
-        // Make sure that panics in the child always abort the process if it doesn't deadlock.
-        // FIXME use std::panic::always_abort() once it is stable
-        std::panic::set_hook(Box::new(|info| {
-            use std::io::Write;
-            let _ = writeln!(std::io::stderr(), "{info}");
-            std::process::exit(101);
-        }));
+unsafe fn fork_for_test(child_func: impl FnOnce() -> std::convert::Infallible) -> ProcessId {
+    use std::io::Write;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::process::exit;
+
+    match fork().unwrap() {
+        ForkResult::Child => {
+            // Make sure that panics in the child always abort the process.
+            let err = match catch_unwind(AssertUnwindSafe(child_func)) {
+                Ok(res) => match res {},
+                Err(err) => err,
+            };
+
+            let s = if let Some(s) = err.downcast_ref::<&str>() {
+                s
+            } else if let Some(s) = err.downcast_ref::<String>() {
+                s
+            } else {
+                "Box<dyn Any>"
+            };
+            let _ = writeln!(std::io::stderr(), "{s}");
+
+            exit(101);
+        }
+        ForkResult::Parent(pid) => pid,
     }
-    result
 }
 
 pub fn setsid() -> io::Result<ProcessId> {
@@ -265,7 +280,7 @@ pub fn set_target_user(
     unsafe {
         cmd.pre_exec(move || {
             cerr(libc::setgroups(
-                target_user.groups.len(),
+                target_user.groups.len() as _,
                 // We can cast to gid_t because `GroupId` is marked as transparent
                 target_user.groups.as_ptr().cast::<libc::gid_t>(),
             ))?;
@@ -548,6 +563,7 @@ pub enum WithProcess {
 }
 
 impl WithProcess {
+    #[cfg(target_os = "linux")]
     fn to_proc_string(&self) -> String {
         match self {
             WithProcess::Current => "self".into(),
@@ -606,6 +622,7 @@ impl Process {
 
     /// Returns the device identifier of the TTY device that is currently
     /// attached to the given process
+    #[cfg(target_os = "linux")]
     pub fn tty_device_id(pid: WithProcess) -> std::io::Result<Option<DeviceId>> {
         // device id of tty is displayed as a signed integer of 32 bits
         let data: i32 = read_proc_stat(pid, 6 /* tty_nr */)?;
@@ -621,7 +638,66 @@ impl Process {
         }
     }
 
+    /// Returns the device identifier of the TTY device that is currently
+    /// attached to the given process
+    #[cfg(target_os = "freebsd")]
+    pub fn tty_device_id(pid: WithProcess) -> std::io::Result<Option<DeviceId>> {
+        use std::ffi::c_void;
+        use std::ptr;
+
+        let mut ki_proc: Vec<libc::kinfo_proc> = Vec::with_capacity(1);
+
+        let pid = match pid {
+            WithProcess::Current => std::process::id() as i32,
+            WithProcess::Other(pid) => pid.inner(),
+        };
+
+        loop {
+            let mut size = ki_proc.capacity() * size_of::<libc::kinfo_proc>();
+            match cerr(unsafe {
+                libc::sysctl(
+                    [
+                        libc::CTL_KERN,
+                        libc::KERN_PROC,
+                        libc::KERN_PROC_PID,
+                        pid,
+                        size_of::<libc::kinfo_proc>() as i32,
+                        1,
+                    ]
+                    .as_ptr(),
+                    4,
+                    ki_proc.as_mut_ptr().cast::<c_void>(),
+                    &mut size,
+                    ptr::null(),
+                    0,
+                )
+            }) {
+                Ok(_) => {
+                    assert!(size >= size_of::<libc::kinfo_proc>());
+                    // SAFETY: The above sysctl has initialized at least `size` bytes. We have
+                    // asserted that this is at least a single element.
+                    unsafe {
+                        ki_proc.set_len(1);
+                    }
+                    break;
+                }
+                Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {
+                    // Vector not big enough. Grow it by 10% and try again.
+                    ki_proc.reserve(ki_proc.capacity() + (ki_proc.capacity() + 9) / 10);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        if ki_proc[0].ki_tdev == !0 {
+            Ok(None)
+        } else {
+            Ok(Some(DeviceId::new(ki_proc[0].ki_tdev)))
+        }
+    }
+
     /// Get the process starting time of a specific process
+    #[cfg(target_os = "linux")]
     pub fn starting_time(pid: WithProcess) -> io::Result<SystemTime> {
         let process_start: u64 = read_proc_stat(pid, 21 /* start_time */)?;
 
@@ -640,6 +716,60 @@ impl Process {
             ((process_start % ticks_per_second) * (1_000_000_000 / ticks_per_second)) as i64,
         ))
     }
+
+    /// Get the process starting time of a specific process
+    #[cfg(target_os = "freebsd")]
+    pub fn starting_time(pid: WithProcess) -> io::Result<SystemTime> {
+        use std::ffi::c_void;
+        use std::ptr;
+
+        let mut ki_proc: Vec<libc::kinfo_proc> = Vec::with_capacity(1);
+
+        let pid = match pid {
+            WithProcess::Current => std::process::id() as i32,
+            WithProcess::Other(pid) => pid.inner(),
+        };
+
+        loop {
+            let mut size = ki_proc.capacity() * size_of::<libc::kinfo_proc>();
+            match cerr(unsafe {
+                libc::sysctl(
+                    [
+                        libc::CTL_KERN,
+                        libc::KERN_PROC,
+                        libc::KERN_PROC_PID,
+                        pid,
+                        size_of::<libc::kinfo_proc>() as i32,
+                        1,
+                    ]
+                    .as_ptr(),
+                    4,
+                    ki_proc.as_mut_ptr().cast::<c_void>(),
+                    &mut size,
+                    ptr::null(),
+                    0,
+                )
+            }) {
+                Ok(_) => {
+                    assert!(size >= size_of::<libc::kinfo_proc>());
+                    // SAFETY: The above sysctl has initialized at least `size` bytes. We have
+                    // asserted that this is at least a single element.
+                    unsafe {
+                        ki_proc.set_len(1);
+                    }
+                    break;
+                }
+                Err(e) if e.raw_os_error() == Some(libc::ENOMEM) => {
+                    // Vector not big enough. Grow it by 10% and try again.
+                    ki_proc.reserve(ki_proc.capacity() + (ki_proc.capacity() + 9) / 10);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        let ki_start = ki_proc[0].ki_start;
+        Ok(SystemTime::new(ki_start.tv_sec, ki_start.tv_usec * 1000))
+    }
 }
 
 /// Read the n-th field (with 0-based indexing) from `/proc/<pid>/self`.
@@ -650,6 +780,7 @@ impl Process {
 /// IMPORTANT: the first two fields are not accessible with this routine.
 ///
 /// [proc_stat_fields]: https://www.kernel.org/doc/html/latest/filesystems/proc.html#id10
+#[cfg(target_os = "linux")]
 fn read_proc_stat<T: FromStr>(pid: WithProcess, field_idx: isize) -> io::Result<T> {
     // the first two fields are skipped by the code below, and we never need them,
     // so no point in implementing code for it in this private function.
@@ -747,7 +878,7 @@ mod tests {
     use super::{
         fork_for_test, getpgrp, setpgid,
         wait::{Wait, WaitOptions},
-        ForkResult, Group, User, WithProcess, ROOT_GROUP_NAME,
+        Group, User, WithProcess, ROOT_GROUP_NAME,
     };
 
     pub(super) fn tempfile() -> std::io::Result<std::fs::File> {
@@ -857,25 +988,23 @@ mod tests {
             pgrp
         );
 
-        // FIXME fork will deadlock when this test panics if it forked while
-        // another test was panicking.
-        match unsafe { super::fork_for_test() } {
-            ForkResult::Child => {
+        let child_pid = unsafe {
+            super::fork_for_test(|| {
                 // wait for the parent.
-                std::thread::sleep(std::time::Duration::from_secs(1))
-            }
-            ForkResult::Parent(child_pid) => {
-                // The child should be in our process group.
-                assert_eq!(
-                    getpgid(child_pid).unwrap(),
-                    getpgid(ProcessId::new(0)).unwrap(),
-                );
-                // Move the child to its own process group
-                setpgid(child_pid, child_pid).unwrap();
-                // The process group of the child should have changed.
-                assert_eq!(getpgid(child_pid).unwrap(), child_pid);
-            }
-        }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                exit(0);
+            })
+        };
+
+        // The child should be in our process group.
+        assert_eq!(
+            getpgid(child_pid).unwrap(),
+            getpgid(ProcessId::new(0)).unwrap(),
+        );
+        // Move the child to its own process group
+        setpgid(child_pid, child_pid).unwrap();
+        // The process group of the child should have changed.
+        assert_eq!(getpgid(child_pid).unwrap(), child_pid);
     }
     #[test]
     fn kill_test() {
@@ -891,20 +1020,20 @@ mod tests {
         // Create a socket so the children write to it if they aren't terminated by `killpg`.
         let (mut rx, mut tx) = UnixStream::pair().unwrap();
 
-        // FIXME fork will deadlock when this test panics if it forked while
-        // another test was panicking.
-        let ForkResult::Parent(pid1) = (unsafe { fork_for_test() }) else {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            tx.write_all(&[42]).unwrap();
-            exit(0);
+        let pid1 = unsafe {
+            fork_for_test(|| {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                tx.write_all(&[42]).unwrap();
+                exit(0);
+            })
         };
 
-        // FIXME fork will deadlock when this test panics if it forked while
-        // another test was panicking.
-        let ForkResult::Parent(pid2) = (unsafe { fork_for_test() }) else {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            tx.write_all(&[42]).unwrap();
-            exit(0);
+        let pid2 = unsafe {
+            fork_for_test(|| {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                tx.write_all(&[42]).unwrap();
+                exit(0);
+            })
         };
 
         drop(tx);
@@ -929,31 +1058,32 @@ mod tests {
 
     #[test]
     fn close_the_universe() {
-        // FIXME fork will deadlock when this test panics if it forked while
-        // another test was panicking.
-        let ForkResult::Parent(child_pid) = (unsafe { fork_for_test() }) else {
-            let should_close =
-                std::fs::File::create(std::env::temp_dir().join("should_close.txt")).unwrap();
-            assert!(!is_closed(&should_close));
+        let child_pid = unsafe {
+            fork_for_test(|| {
+                let should_close =
+                    std::fs::File::create(std::env::temp_dir().join("should_close.txt")).unwrap();
+                assert!(!is_closed(&should_close));
 
-            let should_not_close =
-                std::fs::File::create(std::env::temp_dir().join("should_not_close.txt")).unwrap();
-            assert!(!is_closed(&should_not_close));
+                let should_not_close =
+                    std::fs::File::create(std::env::temp_dir().join("should_not_close.txt"))
+                        .unwrap();
+                assert!(!is_closed(&should_not_close));
 
-            let mut closer = super::FileCloser::new();
+                let mut closer = super::FileCloser::new();
 
-            closer.except(&should_not_close);
+                closer.except(&should_not_close);
 
-            closer.close_the_universe().unwrap();
+                closer.close_the_universe().unwrap();
 
-            assert!(is_closed(&should_close));
+                assert!(is_closed(&should_close));
 
-            assert!(!is_closed(&io::stdin()));
-            assert!(!is_closed(&io::stdout()));
-            assert!(!is_closed(&io::stderr()));
-            assert!(!is_closed(&should_not_close));
+                assert!(!is_closed(&io::stdin()));
+                assert!(!is_closed(&io::stdout()));
+                assert!(!is_closed(&io::stderr()));
+                assert!(!is_closed(&should_not_close));
 
-            exit(0)
+                exit(0)
+            })
         };
 
         let (_, status) = child_pid.wait(WaitOptions::new()).unwrap();
@@ -962,22 +1092,22 @@ mod tests {
 
     #[test]
     fn except_stdio_is_fine() {
-        // FIXME fork will deadlock when this test panics if it forked while
-        // another test was panicking.
-        let ForkResult::Parent(child_pid) = (unsafe { fork_for_test() }) else {
-            let mut closer = super::FileCloser::new();
+        let child_pid = unsafe {
+            fork_for_test(|| {
+                let mut closer = super::FileCloser::new();
 
-            closer.except(&io::stdin());
-            closer.except(&io::stdout());
-            closer.except(&io::stderr());
+                closer.except(&io::stdin());
+                closer.except(&io::stdout());
+                closer.except(&io::stderr());
 
-            closer.close_the_universe().unwrap();
+                closer.close_the_universe().unwrap();
 
-            assert!(!is_closed(&io::stdin()));
-            assert!(!is_closed(&io::stdout()));
-            assert!(!is_closed(&io::stderr()));
+                assert!(!is_closed(&io::stdin()));
+                assert!(!is_closed(&io::stdout()));
+                assert!(!is_closed(&io::stderr()));
 
-            exit(0)
+                exit(0)
+            })
         };
 
         let (_, status) = child_pid.wait(WaitOptions::new()).unwrap();
@@ -988,9 +1118,11 @@ mod tests {
     #[test]
     fn proc_stat_test() {
         use super::{read_proc_stat, Process, WithProcess::Current};
-        // The process can be 'sleeping' or 'running': it looks like the state field of /proc/pid/stat
-        // will show the state for the main thread of the process rather than for the process as a whole.
-        assert!("SR".contains(read_proc_stat::<char>(Current, 2).unwrap()));
+        // The process can be '(uninterruptible) sleeping' or 'running': it looks like the state
+        // field of /proc/pid/stat will show the state for the main thread of the process rather
+        // than for the process as a whole.
+        let state = read_proc_stat::<char>(Current, 2).unwrap();
+        assert!("SDR".contains(state), "{state} is not S, D or R");
         let parent = Process::parent_id().unwrap();
         // field 3 is always the parent process
         assert_eq!(
