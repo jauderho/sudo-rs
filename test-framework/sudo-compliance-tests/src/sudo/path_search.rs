@@ -122,12 +122,12 @@ fn arg0_native_is_passed_from_commandline() -> Result<()> {
     let output = Command::new("sh")
         .args([
             "-c",
-            "ln -s /bin/ls /bin/foo; sudo /bin/foo --invalid-flag; true",
+            "ln -s /bin /nib; sudo /nib/sleep --invalid-flag; true",
         ])
         .output(&env)?;
 
     let stderr = output.stderr();
-    assert_starts_with!(stderr, "/bin/foo: unrecognized option");
+    assert_starts_with!(stderr, "/nib/sleep:");
 
     Ok(())
 }
@@ -158,11 +158,11 @@ fn arg0_script_is_passed_from_commandline() -> Result<()> {
         .build()?;
 
     let output = Command::new("sh")
-        .args(["-c", &format!("ln -s {path} /bin/foo; sudo /bin/foo")])
+        .args(["-c", "ln -s /bin /nib; sudo /nib/my-script"])
         .output(&env)?;
 
     let stdout = output.stdout()?;
-    assert_eq!(stdout, "/bin/foo");
+    assert_eq!(stdout, "/nib/my-script");
 
     Ok(())
 }
@@ -175,7 +175,7 @@ fn arg0_script_is_resolved_from_commandline() -> Result<()> {
         .build()?;
 
     let output = Command::new("sh")
-        .args(["-c", &format!("ln -s {path} /bin/foo; sudo foo")])
+        .args(["-c", &format!("ln -s {path} /usr/bin/foo; sudo foo")])
         .output(&env)?;
 
     let stdout = output.stdout()?;
