@@ -91,6 +91,29 @@ pub(super) enum Hidden<T> {
     WithFeedback(T),
 }
 
+/// Prompt for a password while optionally showing feedback to the user.
+fn prompt_password(
+    source: BorrowedFd<'_>,
+    sink: &mut dyn io::Write,
+    prompt: &str,
+    timeout: Option<Duration>,
+    hidden: Hidden<()>,
+) -> PamResult<PamBuffer> {
+    write_unbuffered(sink, prompt.as_bytes())?;
+
+    let hide_input = match hidden {
+        // If input is not a tty, we can't hide feedback.
+        _ if !safe_isatty(source) => Hidden::No,
+
+        Hidden::No => Hidden::No,
+        Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(source)?),
+        Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(source)?),
+    };
+    let mut reader = TimeoutRead::new(source, timeout);
+
+    read_unbuffered(&mut reader, sink, &hide_input)
+}
+
 /// Heuristically determine the length of the final (potentially incomplete) UTF8 sequence
 fn last_char_size(slice: &[u8]) -> usize {
     let start = |byte| byte & 0b1100_0000 == 0b1100_0000;
@@ -335,34 +358,12 @@ impl Terminal<'_> {
         timeout: Option<Duration>,
         hidden: Hidden<()>,
     ) -> PamResult<PamBuffer> {
-        fn do_hide_input(
-            hidden: Hidden<()>,
-            input: BorrowedFd,
-        ) -> Result<Hidden<HiddenInput>, io::Error> {
-            Ok(match hidden {
-                // If input is not a tty, we can't hide feedback.
-                _ if !safe_isatty(input) => Hidden::No,
-
-                Hidden::No => Hidden::No,
-                Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(input)?),
-                Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(input)?),
-            })
-        }
-
         match self {
             Terminal::StdIE(stdin, stdout) => {
-                write_unbuffered(stdout, prompt.as_bytes())?;
-
-                let hide_input = do_hide_input(hidden, stdin.as_fd())?;
-                let mut reader = TimeoutRead::new(stdin.as_fd(), timeout);
-                read_unbuffered(&mut reader, stdout, &hide_input)
+                prompt_password(stdin.as_fd(), stdout, prompt, timeout, hidden)
             }
             Terminal::Tty(file) => {
-                write_unbuffered(file, prompt.as_bytes())?;
-
-                let hide_input = do_hide_input(hidden, file.as_fd())?;
-                let mut reader = TimeoutRead::new(file.as_fd(), timeout);
-                read_unbuffered(&mut reader, &mut &*file, &hide_input)
+                prompt_password(file.as_fd(), &mut &*file, prompt, timeout, hidden)
             }
             Terminal::Askpass(program, sink) => {
                 let (command_pid, askpass_stdout) = askpass::spawn_askpass(program, prompt)?;
