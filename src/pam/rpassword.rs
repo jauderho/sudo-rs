@@ -14,7 +14,7 @@
 //!   (although much more robust than in the original code)
 
 use std::ffi::c_void;
-use std::io::{self, ErrorKind, Read};
+use std::io::{self, ErrorKind};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -130,7 +130,7 @@ fn last_char_size(slice: &[u8]) -> usize {
 
 /// Reads a password from the given file descriptor while optionally showing feedback to the user.
 fn read_unbuffered(
-    source: &mut dyn io::Read,
+    source: &mut TimeoutRead<'_>,
     sink: &mut dyn io::Write,
     hide_input: &Hidden<HiddenInput>,
 ) -> PamResult<PamBuffer> {
@@ -183,12 +183,13 @@ fn read_unbuffered(
     let mut password = PamBuffer::default();
     let mut pw_len = 0;
 
-    #[allow(clippy::unbuffered_bytes)]
-    for read_byte in source.bytes() {
-        let read_byte = read_byte.map_err(|err| match err {
-            err if err.kind() == io::ErrorKind::TimedOut => PamError::TimedOut,
-            err => PamError::IoError(err),
-        })?;
+    loop {
+        let read_byte = match source.read_byte() {
+            Ok(Some(byte)) => byte,
+            Ok(None) => break,
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => return Err(PamError::TimedOut),
+            Err(err) => return Err(PamError::IoError(err)),
+        };
 
         if read_byte == b'\n' || read_byte == b'\r' {
             return Ok(password);
@@ -260,8 +261,8 @@ impl<'a> TimeoutRead<'a> {
     }
 }
 
-impl io::Read for TimeoutRead<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+impl TimeoutRead<'_> {
+    fn read_byte(&mut self) -> io::Result<Option<u8>> {
         let pollmask = libc::POLLIN | libc::POLLRDHUP;
 
         let mut pollfd = [libc::pollfd {
@@ -296,6 +297,8 @@ impl io::Read for TimeoutRead<'_> {
 
         // There may yet be data waiting to be read even if POLLHUP is set.
         if pollfd[0].revents & (pollmask | libc::POLLHUP) > 0 {
+            let mut buf = [0u8];
+
             // SAFETY: buf is initialized and its length matches
             let ret = cerr(unsafe {
                 libc::read(
@@ -305,7 +308,11 @@ impl io::Read for TimeoutRead<'_> {
                 )
             })?;
 
-            Ok(ret as usize)
+            if ret != 1 {
+                return Ok(None);
+            }
+
+            Ok(Some(buf[0]))
         } else {
             Err(io::Error::from(io::ErrorKind::TimedOut))
         }
@@ -408,13 +415,35 @@ impl Terminal<'_> {
 
 #[cfg(test)]
 mod test {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::os::fd::FromRawFd;
+
+    use libc::O_CLOEXEC;
+
     use super::*;
+
+    fn make_pipe() -> (File, File) {
+        // SAFETY: A valid pointer to a mutable array of 2 fds is passed in.
+        unsafe {
+            let mut pipes = [-1, -1];
+            cerr(libc::pipe2(pipes.as_mut_ptr(), O_CLOEXEC)).unwrap();
+            (File::from_raw_fd(pipes[0]), File::from_raw_fd(pipes[1]))
+        }
+    }
 
     #[test]
     fn miri_test_read() {
-        let mut data = "password123\nhello world".as_bytes();
         let mut stdout = Vec::new();
-        let buf = read_unbuffered(&mut data, &mut stdout, &Hidden::No).unwrap();
+        let (mut rx, mut tx) = make_pipe();
+        tx.write_all("password123\nhello world".as_bytes()).unwrap();
+        drop(tx);
+        let buf = read_unbuffered(
+            &mut TimeoutRead::new(rx.as_fd(), None),
+            &mut stdout,
+            &Hidden::No,
+        )
+        .unwrap();
         // check that the \n is not part of input
         assert_eq!(
             buf.iter()
@@ -424,15 +453,36 @@ mod test {
             "password123"
         );
         // check that the \n is also consumed but the rest of the input is still there
-        assert_eq!(std::str::from_utf8(data).unwrap(), "hello world");
+        let mut data = String::new();
+        rx.read_to_string(&mut data).unwrap();
+        assert_eq!(data, "hello world");
     }
 
     #[test]
     fn miri_test_longpwd() {
         let mut stdout = Vec::new();
-        assert!(read_unbuffered(&mut "a".repeat(511).as_bytes(), &mut stdout, &Hidden::No).is_ok());
+        let (rx, mut tx) = make_pipe();
+        tx.write_all("a".repeat(511).as_bytes()).unwrap();
+        drop(tx);
         assert!(
-            read_unbuffered(&mut "a".repeat(512).as_bytes(), &mut stdout, &Hidden::No).is_err()
+            read_unbuffered(
+                &mut TimeoutRead::new(rx.as_fd(), None),
+                &mut stdout,
+                &Hidden::No
+            )
+            .is_ok()
+        );
+
+        let (rx, mut tx) = make_pipe();
+        tx.write_all("a".repeat(512).as_bytes()).unwrap();
+        drop(tx);
+        assert!(
+            read_unbuffered(
+                &mut TimeoutRead::new(rx.as_fd(), None),
+                &mut stdout,
+                &Hidden::No
+            )
+            .is_err()
         );
     }
 
