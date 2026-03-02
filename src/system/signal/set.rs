@@ -5,6 +5,7 @@ use super::{SignalNumber, handler::SignalHandlerBehavior};
 use std::ffi::c_int;
 use std::io;
 use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[repr(transparent)]
 pub(super) struct SignalAction {
@@ -30,6 +31,10 @@ impl SignalAction {
                     SignalSet::full()?,
                 )
             }
+            SignalHandlerBehavior::StorePending => (
+                store_pending as *const () as libc::sighandler_t,
+                SignalSet::full()?,
+            ),
         };
 
         let mut raw: libc::sigaction = make_zeroed_sigaction();
@@ -50,6 +55,21 @@ impl SignalAction {
         // SAFETY: `sigaction` will have properly initialized `original_action`.
         Ok(unsafe { original_action.assume_init() })
     }
+}
+
+static PENDING_SIGNALS: [AtomicBool; 64] = [const { AtomicBool::new(false) }; 64];
+
+fn store_pending(signal: SignalNumber) {
+    PENDING_SIGNALS[signal as usize].store(true, Ordering::SeqCst);
+}
+
+pub(crate) fn take_first_pending() -> Option<SignalNumber> {
+    for (signal, val) in PENDING_SIGNALS.iter().enumerate() {
+        if val.swap(false, Ordering::SeqCst) {
+            return Some(SignalNumber::try_from(signal).unwrap());
+        }
+    }
+    None
 }
 
 // A signal set that can be used to mask signals.

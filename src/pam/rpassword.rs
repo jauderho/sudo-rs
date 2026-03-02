@@ -20,10 +20,16 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::{fs, mem};
 
-use libc::{ECHO, ECHONL, ICANON, TCSANOW, VEOF, VERASE, VKILL, tcsetattr, termios};
+use libc::{
+    ECHO, ECHONL, ICANON, SIGALRM, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGTSTP, SIGTTIN, SIGTTOU,
+    TCSANOW, VEOF, VERASE, VKILL, tcsetattr, termios,
+};
 
 use crate::cutils::{cerr, safe_isatty};
 use crate::pam::{PamError, PamResult, askpass};
+use crate::system::signal::{
+    self, SignalHandler, SignalHandlerBehavior, SignalsState, exit_with_signal,
+};
 use crate::system::wait::{Wait, WaitError, WaitOptions};
 
 use super::securemem::PamBuffer;
@@ -85,6 +91,7 @@ fn erase_feedback(sink: &mut dyn io::Write, i: usize) {
     }
 }
 
+#[derive(Clone)]
 pub(super) enum Hidden<T> {
     No,
     Yes(T),
@@ -99,19 +106,55 @@ fn prompt_password(
     timeout: Option<Duration>,
     hidden: Hidden<()>,
 ) -> PamResult<PamBuffer> {
-    write_unbuffered(sink, prompt.as_bytes())?;
+    'getpass: loop {
+        write_unbuffered(sink, prompt.as_bytes())?;
 
-    let hide_input = match hidden {
-        // If input is not a tty, we can't hide feedback.
-        _ if !safe_isatty(source) => Hidden::No,
+        let handlers = {
+            // Creating a new SignalsState is fine here as we are guaranteed to restore the signals
+            // again before returning.
+            let original_signals: &mut SignalsState = &mut SignalsState::save().unwrap();
+            [
+                SIGALRM, SIGINT, SIGHUP, SIGQUIT, SIGTERM, SIGTSTP, SIGTTIN, SIGTTOU,
+            ]
+            .map(|signal| {
+                SignalHandler::register(
+                    signal,
+                    SignalHandlerBehavior::StorePending,
+                    original_signals,
+                )
+                .unwrap()
+            })
+        };
 
-        Hidden::No => Hidden::No,
-        Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(source)?),
-        Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(source)?),
-    };
-    let mut reader = TimeoutRead::new(source, timeout);
+        let hide_input = match hidden.clone() {
+            // If input is not a tty, we can't hide feedback.
+            _ if !safe_isatty(source) => Hidden::No,
 
-    read_unbuffered(&mut reader, sink, &hide_input)
+            Hidden::No => Hidden::No,
+            Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(source)?),
+            Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(source)?),
+        };
+        let mut reader = TimeoutRead::new(source, timeout);
+
+        let res = read_unbuffered(&mut reader, sink, &hide_input);
+
+        drop(hide_input);
+        drop(handlers);
+
+        while let Some(signal) = signal::take_first_pending() {
+            match signal {
+                SIGTSTP | SIGTTIN | SIGTTOU => {
+                    crate::system::kill(crate::system::Process::process_id(), signal)?;
+                    continue 'getpass;
+                }
+                _ => {
+                    exit_with_signal(signal).unwrap();
+                }
+            }
+        }
+
+        return res;
+    }
 }
 
 /// Heuristically determine the length of the final (potentially incomplete) UTF8 sequence

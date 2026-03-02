@@ -6,7 +6,7 @@ mod state;
 mod stream;
 
 pub(crate) use handler::{SignalHandler, SignalHandlerBehavior};
-pub(crate) use set::SignalSet;
+pub(crate) use set::{SignalSet, take_first_pending};
 pub(crate) use state::SignalsState;
 pub(crate) use stream::{SignalStream, register_handlers};
 
