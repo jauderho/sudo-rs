@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.13] - 2026-03-10
+
+### Added
+- In `pwfeedback` mode, pressing TAB will turn off the visual feedback (#1487)
+- To allow specifying partial arguments (such as subcommands) in /etc/sudoers
+  rules, a standalone `*` as the last argument can now be used to denote "zero
+  or more following arguments". Attempts to use wildcards in other positions
+  will now result in an explicit parse error with `visudo`. (#1455)
+- A Polish translation of the command line interface
+
+### Changed
+- `Defaults pwfeedback` is now on by default! (#1300)
+- UX improvements in the password prompt: it can be suspended/resumed (#1499),
+  and backspace supports multibyte characters (#1451)
+- sudoedit now also checks ACLs for misconfigurations (#1477)
+- Better error message if sudo-rs is being run in a container that has
+  `no_new_privs` enabled. (#1164)
+- IPv4-like hostnames in `/etc/sudoers` are now explicitly rejected (#1466)
+- sudo-rs now requires at least Rust 1.85 to compile
+
+### Fixed
+- When using `-i / --login`, the HOME, SHELL, USER and LOGNAME are now always
+  set to the target user, even if they are part of the `env_keep` list. (#1335)
+- Arguments in `SUDO_EDITOR` were not supported (#1491)
+- `sudo --bell` did not work with PAM fingerprint module (#1180)
+- Host-specific `Defaults` could result in an erroneous parse error (#1468)
+- Command arguments containing non-UTF8 characters were rejected (#1413)
+- `lecture` setting is now correctly ignored (#1481)
+
 ## [0.2.12] - 2026-02-09
 
 ### Added
@@ -40,7 +69,7 @@
 - Mistakes in the man pages (#1338, #1362, #1387)
 - Better error message when /etc/sudoers contains regular expressions (#1352)
 - Better error message when /etc/sudoers is missing (#1368)
-- Redirecting input/output to another TTY was not recognised as redirection;
+- Redirecting input/output to another TTY was not recognized as redirection;
   this fix originated from Todd Miller's sudo (#1380)
 
 ## [0.2.10] - 2025-11-10
