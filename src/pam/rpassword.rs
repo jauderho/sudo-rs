@@ -107,6 +107,18 @@ fn prompt_password(
     hidden: Hidden<()>,
 ) -> PamResult<PamBuffer> {
     'getpass: loop {
+        let hide_input = match hidden.clone() {
+            // If input is not a tty, we can't hide feedback.
+            _ if !safe_isatty(source) => Hidden::No,
+
+            Hidden::No => Hidden::No,
+            Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(source)?),
+            Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(source)?),
+        };
+        let mut reader = TimeoutRead::new(source, timeout);
+
+        // Write prompt after hiding input to ensure the prompt shows after resuming sudo-rs if it
+        // was started in the background using & rather than -b.
         write_unbuffered(sink, prompt.as_bytes())?;
 
         let handlers = {
@@ -125,16 +137,6 @@ fn prompt_password(
                 .unwrap()
             })
         };
-
-        let hide_input = match hidden.clone() {
-            // If input is not a tty, we can't hide feedback.
-            _ if !safe_isatty(source) => Hidden::No,
-
-            Hidden::No => Hidden::No,
-            Hidden::Yes(()) => Hidden::Yes(HiddenInput::new(source)?),
-            Hidden::WithFeedback(()) => Hidden::WithFeedback(HiddenInput::new(source)?),
-        };
-        let mut reader = TimeoutRead::new(source, timeout);
 
         let res = read_unbuffered(&mut reader, sink, &hide_input);
 
