@@ -331,14 +331,20 @@ impl TimeoutRead<'_> {
             None => -1,
         };
 
-        // SAFETY: pollfd is initialized and its length matches
-        cerr(unsafe {
-            libc::poll(
-                pollfd.as_mut_ptr(),
-                pollfd.len().try_into().unwrap(),
-                timeout,
-            )
-        })?;
+        if cfg!(miri) {
+            // Miri doesn't support poll: rust-lang/miri#4413
+            // FIXME(#1500) remove once miri supports it
+            pollfd[0].revents = libc::POLLIN;
+        } else {
+            // SAFETY: pollfd is initialized and its length matches
+            cerr(unsafe {
+                libc::poll(
+                    pollfd.as_mut_ptr(),
+                    pollfd.len().try_into().unwrap(),
+                    timeout,
+                )
+            })?;
+        }
 
         // There may yet be data waiting to be read even if POLLHUP is set.
         if pollfd[0].revents & (pollmask | libc::POLLHUP) > 0 {
@@ -498,9 +504,9 @@ mod test {
             "password123"
         );
         // check that the \n is also consumed but the rest of the input is still there
-        let mut data = String::new();
-        rx.read_to_string(&mut data).unwrap();
-        assert_eq!(data, "hello world");
+        let mut data = vec![0; "hello world".len()];
+        rx.read_exact(&mut data).unwrap();
+        assert_eq!(data, b"hello world");
     }
 
     #[test]
