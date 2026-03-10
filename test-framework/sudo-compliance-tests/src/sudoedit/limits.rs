@@ -11,10 +11,19 @@ fn cannot_edit_writable_paths() {
     let env = Env(SUDOERS_ALL_ALL_NOPASSWD)
         .user(USERNAME)
         .directory(Directory("/tmp/bar").chmod("755"))
+        .directory(Directory("/bar").chmod("777"))
+        .directory(Directory("/baz").chmod("555").chown(USERNAME))
         .file(DEFAULT_EDITOR, TextFile(EDITOR_DUMMY).chmod(CHMOD_EXEC))
         .build();
 
-    for file in ["/tmp/foo.sh", "/tmp/bar/foo.sh", "/var/tmp/foo.sh"] {
+    for file in [
+        "/tmp/foo.sh",
+        "/tmp/bar/foo.sh",
+        "/var/tmp/foo.sh",
+        "/bar/foo.sh",
+        "/baz/foo.sh",
+    ] {
+        println!("{file}");
         let output = Command::new("sudoedit")
             .as_user(USERNAME)
             .arg(file)

@@ -471,3 +471,44 @@ fn sudo_editor_with_arguments() {
 
     assert_starts_with!(output.stdout(), "1 2 3");
 }
+
+#[test]
+fn write_check_respects_acl() {
+    if sudo_test::is_original_sudo() {
+        // Some weirdness in og-sudo. Has been reported.
+        return;
+    }
+
+    let env = Env(SUDOERS_ALL_ALL_NOPASSWD)
+        .user(USERNAME)
+        .file(
+            DEFAULT_EDITOR,
+            TextFile(
+                "#!/bin/sh
+true",
+            )
+            .chmod(CHMOD_EXEC),
+        )
+        .build();
+
+    Command::new("sudoedit")
+        .arg("/etc/passwd")
+        .as_user(USERNAME)
+        .output(&env)
+        .assert_success();
+
+    Command::new("setfacl")
+        .args(["-m", &format!("u:{USERNAME}:rw"), "/etc"])
+        .output(&env)
+        .assert_success();
+
+    let output = Command::new("sudoedit")
+        .arg("/etc/passwd")
+        .as_user(USERNAME)
+        .output(&env);
+    output.assert_exit_code(1);
+    assert_contains!(
+        output.stderr(),
+        "cannot open a file in a path writable by the user"
+    );
+}
