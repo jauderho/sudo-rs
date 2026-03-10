@@ -69,3 +69,22 @@ fn user_without_permissions_cannot_distinguish_file_existence() {
         }
     }
 }
+
+#[test]
+fn correct_password_with_tab() {
+    let username = "ferris";
+    let password = "secure-pwd";
+    let env = Env(format!("{username}    ALL=(ALL:ALL) ALL"))
+        .user(User(username).password(password))
+        .build();
+
+    for i in 0..password.len() {
+        let mut no_echo_password = password.to_owned();
+        no_echo_password.insert(i, '\t');
+        Command::new("sshpass")
+            .args(["-p", &no_echo_password, "sudo", "true"])
+            .as_user(username)
+            .output(&env)
+            .assert_success();
+    }
+}
