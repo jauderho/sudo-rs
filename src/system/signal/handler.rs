@@ -75,4 +75,6 @@ pub(crate) enum SignalHandlerBehavior {
     Ignore,
     /// Stream the signal information into the latest initialized instance of [`super::SignalStream`].
     Stream,
+    /// Store the signal for retrieval with [`super::set::take_first_pending`].
+    StorePending,
 }
