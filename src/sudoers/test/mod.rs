@@ -607,9 +607,9 @@ fn specific_defaults() {
 fn defaults_hostname_shenanigans() {
     assert!(parse_line("Defaults@ hostname use_pty").is_decl());
     assert!(try_parse_line("Defaults@ # comment\n use_pty").is_none());
-    /* due to a technicality, this is rejected, but ogsudo doesn't accept this either */
-    assert!(try_parse_line("Defaults@\\\nhost use_pty").is_none());
-    /* ogsudo also rejects the following, but sudo-rs has no problems with these */
+    /* ogsudo also rejects the following, probably due to hack in the parser
+    not too dissimilar from ours -- but sudo-rs has no problems with these */
+    assert!(parse_line("Defaults@\\\nhost use_pty").is_decl());
     assert!(parse_line("Defaults:\\\nuser use_pty").is_decl());
     assert!(parse_line("Defaults>\\\nuser use_pty").is_decl());
     assert!(parse_line("Defaults!\\\nCMD use_pty").is_decl());

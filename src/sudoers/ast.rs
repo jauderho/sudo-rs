@@ -661,9 +661,9 @@ fn get_directive<'a>(
             // an acceptable hostname is subset of an acceptable username, so that's actually OK.
             // This resolves an ambiguity in the grammar similarly to how MetaOrTag does that.
             const DEFAULTS_LEN: usize = "Defaults".len();
-            let allow_scope_modifier = stream.get_pos().0 == begin_pos.0
-                && (stream.get_pos().1 - begin_pos.1 == DEFAULTS_LEN
-                    || keyword[DEFAULTS_LEN..].starts_with('@'));
+            let allow_scope_modifier = keyword[DEFAULTS_LEN..].starts_with('@')
+                || (stream.get_pos().0 == begin_pos.0
+                    && stream.get_pos().1 - begin_pos.1 == DEFAULTS_LEN);
 
             let scope = if allow_scope_modifier {
                 if keyword[DEFAULTS_LEN..].starts_with('@') {
