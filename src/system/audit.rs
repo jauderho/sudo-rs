@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_int, c_uint};
-use std::fs::{DirBuilder, File, Metadata, OpenOptions};
-use std::io::{self, Error, ErrorKind};
+use std::fs::{self, DirBuilder, File, Metadata, OpenOptions};
+use std::io::{self, BufReader, Error, ErrorKind};
+use std::net::Shutdown;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::{
     ffi::OsStrExt,
     fs::{DirBuilderExt, MetadataExt, PermissionsExt},
+    net::UnixStream,
     prelude::OpenOptionsExt,
 };
 use std::path::{Component, Path};
@@ -137,6 +139,10 @@ pub fn secure_open_sudoers(path: impl AsRef<Path>, check_parent_dir: bool) -> io
     secure_open_impl(path.as_ref(), &mut open_options, check_parent_dir, false)
 }
 
+pub fn secure_open_remote_sudoers(path: impl AsRef<Path>) -> io::Result<BufReader<UnixStream>> {
+    secure_open_socket_impl(path.as_ref())
+}
+
 /// Open a timestamp cookie file using various security checks
 pub fn secure_open_cookie_file(path: impl AsRef<Path>) -> io::Result<File> {
     let mut open_options = OpenOptions::new();
@@ -232,6 +238,19 @@ fn secure_open_impl(
     checks(path, meta)?;
 
     Ok(file)
+}
+
+// Open the socket at path, provided that it is "secure".
+// "Secure" means that it passes the `checks` function above.
+fn secure_open_socket_impl(path: &Path) -> io::Result<BufReader<UnixStream>> {
+    let meta = fs::metadata(path)?;
+    checks(path, meta)?;
+
+    let stream = UnixStream::connect(path)?;
+    stream.shutdown(Shutdown::Write)?;
+    let reader = BufReader::new(stream);
+
+    Ok(reader)
 }
 
 fn open_at(parent: BorrowedFd, file_name: &CStr, create: bool) -> io::Result<OwnedFd> {

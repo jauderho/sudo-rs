@@ -11,6 +11,7 @@ mod tokens;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -412,6 +413,11 @@ fn open_subsudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
     read_sudoers(source)
 }
 
+fn open_remote_sudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
+    let source = audit::secure_open_remote_sudoers(path)?;
+    read_sudoers(source)
+}
+
 // note: trying to DRY using GAT's is tempting but doesn't make the code any shorter
 
 #[derive(Default)]
@@ -686,6 +692,52 @@ fn analyze(
 
     let mut result: Sudoers = Default::default();
 
+    /// The IncludeState allows to tell whether including new files is allowed.
+    /// There are two situations:
+    /// - inclusion is forbidden (as when the @socket directive is used)
+    /// - inclusion is allowed but we need to ensure we didn't go beyond the limit
+    #[derive(Clone, Copy)]
+    enum IncludeState {
+        Forbidden,
+        Allowed(u8),
+    }
+
+    impl IncludeState {
+        #[inline]
+        fn inc(&mut self) -> &mut Self {
+            if let IncludeState::Allowed(x) = self {
+                *x += 1;
+            }
+            self
+        }
+
+        #[inline]
+        fn limit_reached(&self) -> bool {
+            match self {
+                IncludeState::Forbidden => true,
+                IncludeState::Allowed(x) => *x >= INCLUDE_LIMIT,
+            }
+        }
+    }
+
+    /// The directive that produced the inclusion.
+    enum IncludeDirective {
+        Include,
+        IncludeDir,
+        Remote,
+    }
+
+    impl fmt::Display for IncludeDirective {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let s = match self {
+                IncludeDirective::Include => "@include",
+                IncludeDirective::IncludeDir => "@includedir",
+                IncludeDirective::Remote => "@socket",
+            };
+            write!(f, "{s}")
+        }
+    }
+
     fn resolve_relative(base: &Path, path: impl AsRef<Path>) -> PathBuf {
         if path.as_ref().is_relative() {
             // there should always be a parent since we start with /etc/sudoers, and make every other path
@@ -704,26 +756,40 @@ fn analyze(
         span: Span,
         path: &Path,
         diagnostics: &mut Vec<Error>,
-        count: &mut u8,
+        include_state: &mut IncludeState,
+        include_source: IncludeDirective,
     ) {
-        if *count >= INCLUDE_LIMIT {
+        // IncludeState::limit_reached() will also detect forbidden includes
+        if include_state.limit_reached() {
+            let message = match include_state {
+                IncludeState::Allowed(_) => {
+                    format!("include file limit reached opening '{}'", path.display())
+                }
+                IncludeState::Forbidden => {
+                    format!("{} forbidden at this stage", include_source)
+                }
+            };
             diagnostics.push(Error {
                 source: Some(parent.to_owned()),
                 location: Some(span),
-                message: format!("include file limit reached opening '{}'", path.display()),
-            })
-        // FIXME: this will cause an error in `visudo` if we open a non-privileged sudoers file
-        // that includes another non-privileged sudoer files.
+                message,
+            });
         } else {
-            match open_subsudoers(path) {
-                Ok(subsudoer) => {
-                    *count += 1;
-                    process(cfg, path, subsudoer, diagnostics, count)
-                }
+            let (res, next_state, kind) = match include_source {
+                IncludeDirective::Remote => (
+                    open_remote_sudoers(path),
+                    &mut IncludeState::Forbidden,
+                    "socket",
+                ),
+                _ => (open_subsudoers(path), include_state.inc(), "file"),
+            };
+
+            match res {
+                Ok(subsudoer) => process(cfg, path, subsudoer, diagnostics, next_state),
                 Err(e) => {
                     let message = if e.kind() == io::ErrorKind::NotFound {
                         // improve the error message in this case
-                        format!("cannot open sudoers file '{}'", path.display())
+                        format!("cannot open sudoers {} '{}'", kind, path.display())
                     } else {
                         e.to_string()
                     };
@@ -743,7 +809,7 @@ fn analyze(
         cur_path: &Path,
         sudoers: impl IntoIterator<Item = basic_parser::Parsed<Sudo>>,
         diagnostics: &mut Vec<Error>,
-        safety_count: &mut u8,
+        include_state: &mut IncludeState,
     ) {
         for item in sudoers {
             match item {
@@ -788,7 +854,8 @@ fn analyze(
                         span,
                         &resolve_relative(cur_path, path),
                         diagnostics,
-                        safety_count,
+                        include_state,
+                        IncludeDirective::Include,
                     ),
 
                     Sudo::Remote(path, span) => {
@@ -803,7 +870,15 @@ fn analyze(
                             });
                         }
 
-                        todo!("do something similar as 'include()'");
+                        include(
+                            cfg,
+                            cur_path,
+                            span,
+                            socket_path,
+                            diagnostics,
+                            include_state,
+                            IncludeDirective::Remote,
+                        );
                     }
 
                     Sudo::IncludeDir(path, span) => {
@@ -847,7 +922,8 @@ fn analyze(
                                 span,
                                 file.as_ref(),
                                 diagnostics,
-                                safety_count,
+                                include_state,
+                                IncludeDirective::IncludeDir,
                             )
                         }
                     }
@@ -878,7 +954,13 @@ fn analyze(
     }
 
     let mut diagnostics = vec![];
-    process(&mut result, path, sudoers, &mut diagnostics, &mut 0);
+    process(
+        &mut result,
+        path,
+        sudoers,
+        &mut diagnostics,
+        &mut IncludeState::Allowed(0),
+    );
 
     let alias = &mut result.aliases;
     alias.user.0 = sanitize_alias_table(&alias.user.1, &mut diagnostics);
