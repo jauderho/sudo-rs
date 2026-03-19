@@ -121,7 +121,7 @@ impl SuContext {
         // the shell specified with --shell
         // the shell specified in the environment variable SHELL, if the --preserve-environment option is used
         // the shell listed in the passwd entry of the target user
-        let user_shell = user.shell.clone();
+        let user_shell = &user.shell;
 
         let mut command = options
             .shell
@@ -141,11 +141,8 @@ impl SuContext {
         // then the --shell option or the $SHELL environment variable won't be
         // taken into account, unless su is called by root.
         if is_restricted(user_shell.as_path()) && !is_current_root {
-            user_warn!(
-                "using restricted shell {path}",
-                path = user_shell.as_os_str().to_string_lossy()
-            );
-            command = user_shell;
+            command = user_shell.to_path_buf();
+            user_warn!("using restricted shell {path}", path = command.display());
         }
 
         if !command.exists() {
@@ -222,8 +219,9 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::{
-        common::Error,
+        common::{Error, resolve::CurrentUser},
         su::cli::{SuAction, SuOptions, SuRunOptions},
+        su::context::User,
     };
 
     use super::SuContext;
@@ -262,11 +260,15 @@ mod tests {
 
     #[test]
     fn invalid_shell() {
-        let options = get_options(&["-s", "/not/a/shell"]);
-        let result = SuContext::from_env(options);
-        let expected = Error::CommandNotFound(PathBuf::from("/not/a/shell"));
+        let cur_user = CurrentUser::resolve().unwrap();
+        let daemon = User::from_name(c"daemon").unwrap().unwrap();
+        for user in [&cur_user, &daemon] {
+            let options = get_options(&["-s", "/not/a/shell", &user.name]);
+            let result = SuContext::from_env(options);
+            let expected = Error::CommandNotFound(PathBuf::from("/not/a/shell"));
 
-        assert!(result.is_err());
-        assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
+            assert!(result.is_err());
+            assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
+        }
     }
 }
