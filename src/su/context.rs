@@ -265,16 +265,25 @@ mod tests {
         for user in [&cur_user, &daemon] {
             let options = get_options(&["-s", "/not/a/shell", &user.name]);
             let result = SuContext::from_env(options);
-            let expected = Error::CommandNotFound(PathBuf::from("/not/a/shell"));
+            let expected;
 
             // this test is allowed to fail if run as root -- do not run unit tests as root
             if is_restricted(&user.shell) {
-                assert!(result.is_ok());
-                assert_eq!(result.unwrap().command, user.shell);
+                if let Ok(ctx) = result {
+                    // some linux distro's actually provide a "/bin/nologin" command; in this
+                    // case we test that the --shell command is properly ignored
+                    assert_eq!(ctx.command, user.shell);
+                    return;
+                } else {
+                    // others (Fedora) do not
+                    expected = Error::CommandNotFound(PathBuf::from(&user.shell));
+                }
             } else {
-                assert!(result.is_err());
-                assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
+                expected = Error::CommandNotFound(PathBuf::from("/not/a/shell"));
             }
+
+            assert!(result.is_err());
+            assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
         }
     }
 }
