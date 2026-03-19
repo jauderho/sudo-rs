@@ -221,7 +221,7 @@ mod tests {
     use crate::{
         common::{Error, resolve::CurrentUser},
         su::cli::{SuAction, SuOptions, SuRunOptions},
-        su::context::User,
+        su::context::{User, is_restricted},
     };
 
     use super::SuContext;
@@ -267,8 +267,14 @@ mod tests {
             let result = SuContext::from_env(options);
             let expected = Error::CommandNotFound(PathBuf::from("/not/a/shell"));
 
-            assert!(result.is_err());
-            assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
+            // this test is allowed to fail if run as root -- do not run unit tests as root
+            if is_restricted(&user.shell) {
+                assert!(result.is_ok());
+                assert_eq!(result.unwrap().command, user.shell);
+            } else {
+                assert!(result.is_err());
+                assert_eq!(format!("{}", result.err().unwrap()), format!("{expected}"));
+            }
         }
     }
 }
