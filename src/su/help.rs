@@ -13,7 +13,7 @@ const HELP_MSG: &str = "Options:
 -, -l, --login                  make the shell a login shell
 -c, --command <command>         pass a single command to the shell with -c
 -s, --shell <shell>             run <shell> if /etc/shells allows it
--P, --pty                       create a new pseudo-terminal
+-P, --pty                       ignored (a pseudo-terminal is always used when possible)
 
 -h, --help                      display this help
 -V, --version                   display version
