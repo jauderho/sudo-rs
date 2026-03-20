@@ -6,11 +6,22 @@ use ref.Ref
 use seq.Seq
 use witness.Witness
 
+(* model for a hashmap *)
+type table 'id 'value
+
+val function contains_key (t: table 'id 'value) (key: 'id): bool
+
+val function get (t: table 'id 'value) (key: 'id): 'value
+  requires { contains_key t key }
+
 (* loose models for the types in sudoers::Ast *)
-type metavar 'a = All | Only 'a | Alias
+
+type name
+type metavar 'a = All | Only 'a | Alias name
 type qualified 'a = Allow 'a | Forbid 'a
 type spec 'tag 'a = { inner: qualified (metavar 'a); info: 'tag }
-type found_aliases = option bool
+
+type found_aliases = table name bool
 
 val constant aliases: found_aliases
 
@@ -23,15 +34,11 @@ function who (item: spec 'tag 'a): metavar 'a
     | Forbid x -> x
     end
 
-let function unwrap (aliases: found_aliases): bool
-  requires { not is_none aliases }
-= match aliases with Some value -> value end
-
 function condition (item: spec 'tag 'a): option 'tag
   = match item with
-    | { inner = Allow Alias; info = tag } -> if unwrap aliases then Some tag else None
-    | { inner = Forbid Alias; info = tag } -> if unwrap aliases then None else Some tag
-    | { inner = Allow _; info = tag } -> Some tag
+    | { inner = Allow  (Alias name); info = tag } -> if get aliases name then Some tag else None
+    | { inner = Forbid (Alias name); info = tag } -> if get aliases name then None else Some tag
+    | { inner = Allow _;             info = tag } -> Some tag
     | _ -> None
     end
 
@@ -39,7 +46,7 @@ function matched_by (pred: 'a -> bool) (item: spec 'tag 'a): bool
   = match who item with
     | All -> true
     | Only x -> pred x
-    | Alias -> not is_none aliases
+    | Alias name -> contains_key aliases name
     end
 
 let function bool_then (b: bool) (x: 'a): option 'a
@@ -72,8 +79,8 @@ let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool): option 'tag
     match who with
       | All -> result := judgement.bool_then(info)
       | Only id -> if pred id then result := judgement.bool_then(info)
-      | Alias -> if not is_none aliases then
-          result := if unwrap aliases then
+      | Alias name -> if aliases.contains_key name then
+          result := if aliases.get name then
              judgement.bool_then(info)
           else
              (not judgement).bool_then(info)
