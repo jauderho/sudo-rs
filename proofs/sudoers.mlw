@@ -7,9 +7,12 @@ use seq.Seq
 use witness.Witness
 
 (* loose models for the types in sudoers::Ast *)
-type metavar 'a = All | Only 'a
+type metavar 'a = All | Only 'a | Alias
 type qualified 'a = Allow 'a | Forbid 'a
 type spec 'tag 'a = { inner: qualified (metavar 'a); info: 'tag }
+type found_aliases = option bool
+
+val constant aliases: found_aliases
 
 predicate contains (pred: 'a -> bool) (a: seq 'a)
   = exists i. 0 <= i < length a /\ pred a[i]
@@ -20,8 +23,14 @@ function who (item: spec 'tag 'a): metavar 'a
     | Forbid x -> x
     end
 
+let function unwrap (aliases: found_aliases): bool
+  requires { not is_none aliases }
+= match aliases with Some value -> value end
+
 function condition (item: spec 'tag 'a): option 'tag
   = match item with
+    | { inner = Allow Alias; info = tag } -> if unwrap aliases then Some tag else None
+    | { inner = Forbid Alias; info = tag } -> if unwrap aliases then None else Some tag
     | { inner = Allow _; info = tag } -> Some tag
     | _ -> None
     end
@@ -30,6 +39,7 @@ function matched_by (pred: 'a -> bool) (item: spec 'tag 'a): bool
   = match who item with
     | All -> true
     | Only x -> pred x
+    | Alias -> not is_none aliases
     end
 
 let function bool_then (b: bool) (x: 'a): option 'a
@@ -62,6 +72,11 @@ let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool): option 'tag
     match who with
       | All -> result := judgement.bool_then(info)
       | Only id -> if pred id then result := judgement.bool_then(info)
+      | Alias -> if not is_none aliases then
+          result := if unwrap aliases then
+             judgement.bool_then(info)
+          else
+             (not judgement).bool_then(info)
     end;
   done;
 
