@@ -14,7 +14,7 @@ use crate::exec::ExitReason;
 use crate::log::{user_error, user_info};
 use crate::system::file::{FileLock, create_temporary_dir};
 use crate::system::wait::{Wait, WaitError, WaitOptions};
-use crate::system::{ForkResult, fork, mark_fds_as_cloexec};
+use crate::system::{ForkResult, audit, fork, mark_fds_as_cloexec};
 
 struct ParentFileInfo<'a> {
     path: &'a Path,
@@ -206,11 +206,9 @@ fn handle_child_inner(
 ) -> Result<(), String> {
     mark_fds_as_cloexec().map_err(|e| format!("Failed to mark fds as CLOEXEC: {e}"))?;
 
-    // Drop root privileges.
-    // SAFETY: setuid does not change any memory and only affects OS state.
-    unsafe {
-        libc::setuid(libc::getuid());
-    }
+    // root privileges are dangerous after this point, since we are about to manipulate the
+    // file system and execute a command under control of the user, so drop them
+    audit::irrevocably_drop_privileges();
 
     let tempdir = TempDirDropGuard(
         create_temporary_dir()
