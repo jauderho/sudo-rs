@@ -95,6 +95,24 @@ pub(crate) fn sudo_call<T>(
     Ok(result)
 }
 
+/// Drop root privileges by setting effective user id equal to the real user id.
+/// This routine will panic if the process is not privileged.
+pub fn irrevocably_drop_privileges() {
+    // SAFETY:
+    // - getuid() and geteuid() are always safe to call
+    // - setuid() does not change any memory and only affects OS state.
+    unsafe {
+        let real_uid = libc::getuid();
+        let effective_uid = libc::geteuid();
+        // we never use setuid/setgid/setgroups except in the pre_exec hook before exec'ing,
+        // or in sudo_call (which always resets the user state after the closure finishes).
+        // this extra check is here to punish programming mistakes due to sloppiness.
+        assert_eq!(effective_uid, UserId::ROOT.inner(), "setuid violation");
+
+        cerr(libc::setuid(real_uid)).expect("setuid violation");
+    }
+}
+
 // of course we can also write "file & 0o040 != 0", but this makes the intent explicit
 enum Op {
     Read = 4,
