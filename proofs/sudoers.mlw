@@ -23,8 +23,6 @@ type spec 'tag 'a = { inner: qualified (metavar 'a); info: 'tag }
 
 type found_aliases = table name bool
 
-val constant aliases: found_aliases
-
 predicate contains (pred: 'a -> bool) (a: seq 'a)
   = exists i. 0 <= i < length a /\ pred a[i]
 
@@ -34,7 +32,7 @@ function who (item: spec 'tag 'a): metavar 'a
     | Forbid x -> x
     end
 
-function condition (item: spec 'tag 'a): option 'tag
+function condition (aliases: found_aliases) (item: spec 'tag 'a): option 'tag
   = match item with
     | { inner = Allow  (Alias name); info = tag } -> if get aliases name then Some tag else None
     | { inner = Forbid (Alias name); info = tag } -> if get aliases name then None else Some tag
@@ -42,7 +40,7 @@ function condition (item: spec 'tag 'a): option 'tag
     | _ -> None
     end
 
-function matched_by (pred: 'a -> bool) (item: spec 'tag 'a): bool
+function matched_by (aliases: found_aliases) (pred: 'a -> bool) (item: spec 'tag 'a): bool
   = match who item with
     | All -> true
     | Only x -> pred x
@@ -59,18 +57,25 @@ function final_match (pred: 'a -> bool) (items: seq 'a): 'a
   = items[witness (is_final_match pred items)]
 
 (* Why3 model of the sudoers::find_item function *)
-let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool): option 'tag
-    returns {
-      | Some tag -> contains (matched_by pred) items && condition (final_match (matched_by pred) items) = Some tag
-      | None     -> contains (matched_by pred) items -> condition (final_match (matched_by pred) items) = None
+let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool) (aliases: found_aliases): option 'tag
+    ensures {
+      let matched = matched_by aliases pred in
+      let condition = condition aliases in
+      match result with
+      | Some tag -> contains matched items && condition (final_match matched items) = Some tag
+      | None     -> contains matched items -> condition (final_match matched items) = None
+      end
     }
 
-= let result = ref None in
+= let ghost function matched = matched_by aliases pred in
+  let ghost function condition (item: spec 'tag 'a) = condition aliases item in
+
+  let result = ref None in
 
   for i = 0 to items.length - 1 do
     invariant { forall tag. !result = Some tag <->
-                  exists j.  0 <= j < i /\ matched_by pred items[j] /\ Some tag = condition items[j] /\
-                  forall k. j < k < i -> not matched_by pred items[k] }
+                  exists j.  0 <= j < i /\ matched items[j] /\ Some tag = condition items[j] /\
+                  forall k. j < k < i -> not matched items[k] }
     let (judgement, who) = match items[i].inner with
       | Forbid x -> (false, x)
       | Allow x -> (true, x)
@@ -89,12 +94,12 @@ let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool): option 'tag
 
   (* perform a "virtual loop" to strength the case !result = None;
      this could also be solved by adding a ghost variable above *)
-  ghost if is_none !result && contains (matched_by pred) items then
+  ghost if is_none !result && contains matched items then
     for i = items.length - 1 downto 0 do
-      invariant { forall k. i < k < items.length -> not matched_by pred items[k] }
-      invariant { exists k. 0 <= k <= i /\ matched_by pred items[k] }
-      if matched_by pred items[i] then begin
-        assert { condition (final_match (matched_by pred) items) = None };
+      invariant { forall k. i < k < items.length -> not matched items[k] }
+      invariant { exists k. 0 <= k <= i /\ matched items[k] }
+      if matched items[i] then begin
+        assert { condition (final_match matched items) = None };
         break;
       end;
     done;
