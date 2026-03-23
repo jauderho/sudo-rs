@@ -95,9 +95,8 @@ pub(crate) fn sudo_call<T>(
     Ok(result)
 }
 
-/// Drop root privileges by setting effective user id equal to the real user id,
-/// and guaranteeing the real user isn't root. This routine will panic if the process
-/// is not privileged.
+/// Drop root privileges by setting effective user id equal to the real user id.
+/// This routine will panic if the process is not privileged.
 pub fn irrevocably_drop_privileges() {
     // SAFETY:
     // - getuid() and geteuid() are always safe to call
