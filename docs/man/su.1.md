@@ -31,18 +31,19 @@ title: SU(1) sudo-rs 0.2.13 | sudo-rs
 :   Do not reset environment variables
 
 `-P`, `--pty`
-:   Create a new pseudo-terminal when running the shell.
+:   Ignored for backwards compatibility. This version of su always creates
+    a new pseudo-terminal if it is attached to a TTY
 
 `-w` *list*, `--whitelist-environment`=*list*
 :   Do not reset the environment variables specified by the *list*. Multiple
-    variables can be separated by commas.
+    variables can be separated by commas
 
 `-s` *shell*, `--shell`=*shell*
 :   Run *shell* if `/etc/shells` allows running as that shell instead of the
-    default shell for the user.
+    default shell for the user
 
 `-V`, `--version`
-:   Show the program version.
+:   Show the program version
 
 # SEE ALSO
 

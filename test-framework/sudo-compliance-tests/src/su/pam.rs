@@ -2,7 +2,7 @@
 
 use sudo_test::{BIN_TRUE, Command, Env, User};
 
-use crate::{PASSWORD, USERNAME};
+use crate::{OTHER_USERNAME, PASSWORD, USERNAME};
 
 #[test]
 fn given_pam_permit_then_no_password_auth_required() {
@@ -19,9 +19,25 @@ fn given_pam_permit_then_no_password_auth_required() {
 }
 
 #[test]
+fn passwordless_accounts_dont_require_auth() {
+    let env = Env("").user(USERNAME).user(OTHER_USERNAME).build();
+
+    Command::new("passwd")
+        .args(["-d", OTHER_USERNAME])
+        .output(&env)
+        .assert_success();
+
+    Command::new("su")
+        .args([OTHER_USERNAME, "-c", BIN_TRUE])
+        .as_user(USERNAME)
+        .output(&env)
+        .assert_success();
+}
+
+#[test]
 fn given_pam_deny_then_password_auth_always_fails() {
     let invoking_user = USERNAME;
-    let target_user = "ghost";
+    let target_user = OTHER_USERNAME;
 
     let env = Env("")
         .file("/etc/pam.d/su", "auth requisite pam_deny.so")
