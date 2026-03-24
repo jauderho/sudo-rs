@@ -93,6 +93,16 @@ security.sudo-rs.enable = true;
 
 This will replace the usual `sudo` and `sudoedit` commands.
 
+### Alpine Linux
+
+On Alpine Linux, sudo-rs is in the *community* repository, and can be installed as:
+```sh
+apk add sudo-rs
+```
+
+This will install the `sudo` and `visudo` commands (but not `sudoedit` as a separate command name, nor does it replace `su`, which is still
+offered through BusyBox).
+
 ### Installing our pre-compiled x86-64 binaries
 
 You can also switch to sudo-rs manually by using our pre-compiled tarballs.
