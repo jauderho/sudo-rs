@@ -19,7 +19,7 @@ use crate::{
     system::{
         _exit, ForkResult, fork, getpgid, getpgrp,
         interface::ProcessId,
-        kill, setpgid, setsid,
+        killpg, setpgid, setsid,
         term::{PtyFollower, Terminal},
         wait::{Wait, WaitError, WaitOptions},
     },
@@ -320,7 +320,6 @@ impl<'a> MonitorClosure<'a> {
             signal_fmt(signal),
             opt_fmt(from_parent, " from parent"),
         );
-        // FIXME: We should call `killpg` instead of `kill`.
         match signal {
             SIGALRM => {
                 terminate_process(command_pid, false);
@@ -333,7 +332,7 @@ impl<'a> MonitorClosure<'a> {
                         self.command_pgrp
                     );
                 }
-                kill(command_pid, SIGCONT).ok();
+                killpg(command_pid, SIGCONT).ok();
             }
             SIGCONT_BG => {
                 // Continue with the monitor as the foreground process group
@@ -343,11 +342,11 @@ impl<'a> MonitorClosure<'a> {
                         self.monitor_pgrp
                     );
                 }
-                kill(command_pid, SIGCONT).ok();
+                killpg(command_pid, SIGCONT).ok();
             }
             signal => {
                 // Send the signal to the command.
-                kill(command_pid, signal).ok();
+                killpg(command_pid, signal).ok();
             }
         }
     }
