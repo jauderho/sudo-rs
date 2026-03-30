@@ -172,7 +172,7 @@ msgid ""
 "Sorry, user {user} is not allowed to execute '{command}' as {other_user} on "
 "{hostname}."
 msgstr ""
-"Lo siento, el usuario {user} no tiene permitido ejecutar «{command}» como {other_user} en"
+"Lo siento, el usuario {user} no tiene permitido ejecutar «{command}» como {other_user} en "
 "{hostname}."
 
 #: src/common/error.rs:61
@@ -323,8 +323,8 @@ msgstr "sn"
 
 #: src/sudo/edit.rs:311
 #, rust-format
-msgid "sudoedit: ¿truncar {path} a cero? (s/n) [n] "
-msgstr ""
+msgid "sudoedit: truncate {path} to zero? (y/n) [n] "
+msgstr "sudoedit: ¿truncar {path} a cero? (s/n) [n] "
 
 #: src/sudo/edit.rs:324
 #, rust-format
@@ -454,7 +454,7 @@ msgid ""
 "argument, --reset-timestamp"
 msgstr ""
 "se esperaba una de las siguientes acciones: --help, --version, "
-"--remove-timestamp, --validate, --list, --edit, --login, -shell, "
+"--remove-timestamp, --validate, --list, --edit, --login, --shell, "
 "un comando como argumento posicional, --reset-timestamp"
 
 #: src/sudo/cli/mod.rs:672
