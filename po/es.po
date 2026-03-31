@@ -8,7 +8,7 @@ msgstr ""
 "Report-Msgid-Bugs-To: https://github.com/trifectatechfoundation/sudo-rs/"
 "issues\n"
 "POT-Creation-Date: 2026-10-03 17:30+0100\n"
-"PO-Revision-Date: 2026-29-03 08:33+0100\n"
+"PO-Revision-Date: 2026-18-04 17:28+0100\n"
 "Last-Translator: Guler01\n"
 "Language-Team: Language =es\n"
 "Language: =es\n"
@@ -20,7 +20,7 @@ msgstr ""
 #: src/common/error.rs:89
 #, rust-format
 msgid "I'm sorry {user}. I'm afraid I can't do that"
-msgstr "Lo siento, {user}. Me temo que no puedo hacerlo."
+msgstr "Lo siento, {user}. Temo que no puedo hacerlo."
 
 #: src/sudoers/entry/verbose.rs:33
 msgid "Commands:"
@@ -33,12 +33,12 @@ msgstr "Entrada de sudoers:"
 #. TRANSLATORS: This is sudo-specific jargon.
 #: src/sudoers/entry/verbose.rs:54
 msgid "RunAsUsers"
-msgstr "RunAs-usuarios"
+msgstr "UsuariosPermitidos"
 
 #. TRANSLATORS: This is sudo-specific jargon.
 #: src/sudoers/entry/verbose.rs:64
 msgid "RunAsGroups"
-msgstr "RunAs-grupos"
+msgstr "GruposPermitidos"
 
 #: src/sudoers/entry/verbose.rs:70
 msgid "Options"
@@ -64,11 +64,11 @@ msgstr "No se pudieron leer los datos de entrada como una cadena UTF-8"
 
 #: src/pam/error.rs:214
 msgid "Account validation failure, is your account locked?"
-msgstr "Error al validar la cuenta, ¿tu cuenta está bloqueada?"
+msgstr "Error al validar la cuenta, ¿está tu cuenta bloqueada?"
 
 #: src/pam/error.rs:219
 msgid "Account or password is expired, reset your password and try again"
-msgstr "La cuenta o la contraseña está caducada; restablezca su contraseña y vuelva a intentar."
+msgstr "La cuenta o la contraseña está caducada; restablece tu contraseña y vuelve a intentarlo."
 
 #: src/pam/error.rs:223
 msgid "Password expired, contact your system administrator"
@@ -82,7 +82,7 @@ msgstr "Error del PAM: {error}"
 #: src/pam/error.rs:226 src/common/error.rs:116
 #, rust-format
 msgid "IO error: {error}"
-msgstr "Error de ES: {error}"
+msgstr "Error de E/S: {error}"
 
 #: src/pam/error.rs:227
 msgid "A terminal is required to authenticate"
@@ -220,7 +220,7 @@ msgstr "no se pudo ejecutar «{path}»: {error}"
 #: src/common/error.rs:122
 #, rust-format
 msgid "maximum {num} incorrect authentication attempts"
-msgstr "máximo de {num} intentos de autentificación incorrectos"
+msgstr "máximo de {num} intentos fallidos de autentificación"
 
 #: src/common/error.rs:128
 #, rust-format
@@ -299,7 +299,7 @@ msgstr "no se pudo crear el archivo temporal {path}: {error}"
 #: src/sudo/edit.rs:248
 #, rust-format
 msgid "failed to write to temporary file {path}: {error}"
-msgstr "no se pudo escribir al archivo temporal {path}: {error}"
+msgstr "no se pudo escribir en el archivo temporal {path}: {error}"
 
 #: src/sudo/edit.rs:268
 #, rust-format
@@ -329,12 +329,12 @@ msgstr "sudoedit: ¿truncar {path} a cero? (s/n) [n] "
 #: src/sudo/edit.rs:324
 #, rust-format
 msgid "not overwriting {path}"
-msgstr "no sobrescribir {path}"
+msgstr "no se sobrescribe {path}"
 
 #: src/sudo/edit.rs:328 src/sudo/edit.rs:337
 #, rust-format
 msgid "failed to write data to parent: {error}"
-msgstr "no se pudieron escribir datos al padre: {error}"
+msgstr "no se pudieron escribir datos al proceso padre: {error}"
 
 #: src/sudo/pipeline/edit.rs:33
 #, rust-format
@@ -344,7 +344,7 @@ msgstr "{path}: no está permitido editar enlaces simbólicos"
 #: src/sudo/pipeline/edit.rs:39
 #, rust-format
 msgid "error opening {path}: {error}"
-msgstr "error abriendo {path}: {error}"
+msgstr "error al abrir {path}: {error}"
 
 #: src/sudo/pipeline/edit.rs:46
 #, rust-format
@@ -353,7 +353,7 @@ msgstr "ruta inválida: {path}"
 
 #: src/sudo/pipeline/edit.rs:51
 msgid "please address the problems and try again"
-msgstr "por favor, solucione los problemas y vuelva a intentar"
+msgstr "por favor, soluciona los problemas y vuelve a intentarlo"
 
 #: src/sudo/pipeline/list.rs:48
 #, rust-format
@@ -402,7 +402,7 @@ msgstr ""
 "  -k, --reset-timestamp         invalidar el archivo de marca de tiempo\n"
 "  -n, --non-interactive         modo no interactivo, no se solicitan entradas\n"
 "  -p, --prompt=solicitud        usar la solicitud de contraseña especificada\n"
-"  -S, --stdin                   leer contraseña de la entrada estándar\n"
+"  -S, --stdin                   leer contraseña a través de la entrada estándar\n"
 "  -u, --user=usuario            ejecutar comando (o editar archivo) como el "
 "nombre\n"
 "                                o ID de usuario especificado\n"
@@ -430,7 +430,7 @@ msgstr "comando (argumento posicional)"
 
 #: src/sudo/cli/mod.rs:403
 msgid "expected one of: --login, --shell, a command as a positional argument"
-msgstr "se esperaba una de los siguientes: --login, --shell, un comando como "
+msgstr "se esperaba una de las siguientes: --login, --shell, un comando como "
 "argumento posicional"
 
 #: src/sudo/cli/mod.rs:544
@@ -497,13 +497,13 @@ msgid ""
 msgstr ""
 "no se encontró el archivo sudoers: {path}\n"
 "\n"
-"Se requiere el archivo sudoers para que sudo-rs funcione. Asegúrese de:\n"
-"- Que el archivo existe en la ubicación esperada\n"
-"- Tienes los permisos necesarios para leerlo\n"
+"Se requiere el archivo sudoers para que sudo-rs funcione. Asegúrate de:\n"
+"- Que el archivo exista en la ubicación esperada\n"
+"- Que tengas los permisos necesarios para leerlo\n"
 "- Si estás configurando sudo-rs por primera vez, crea un archivo sudoers con "
 "los permisos apropiados\n"
 "\n"
-"Para más información, revisa la documentación de sudo-rs."
+"Para más información, consulta la documentación de sudo-rs."
 
 #: src/sudo/pipeline.rs:41
 #, rust-format
@@ -581,7 +581,7 @@ msgstr ""
 "                                específico; usar dos veces para un formato extendido\n"
 "  -n, --non-interactive         modo no interactivo, no se solicitan entradas\n"
 "  -p, --prompt=solicitud        usar la solicitud de contraseña especificada\n"
-"  -S, --stdin                   leer contraseña de la entrada estándar\n"
+"  -S, --stdin                   leer contraseña a través de la entrada estándar\n"
 "  -s, --shell                   ejecutar la shell como el usuario objetivo; también "
 "se puede especificar\n"
 "                                un comando\n"
