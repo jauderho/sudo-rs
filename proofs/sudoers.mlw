@@ -205,47 +205,21 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool) (ghost lookup_table: fm
                   H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
 
       let (id, specs) = table[i] in
-      label Foo in
+      label Loop in
       if is_some (find_item specs pred (unmut !set)) then
         begin
-          check { condition !set (final_match (matched_by !set pred) specs) = Some () };
-          check { contains (matched_by !set pred) specs };
           H.add id true !set;
-          check { contains (matched_by !set pred) specs };
-          assert { forall k. 0 <= k < length specs -> matched_by !set pred specs[k] = matched_by (!set at Foo) pred specs[k] };
-          assert { forall i. is_final_match (matched_by !set pred) specs i <-> is_final_match (matched_by (!set at Foo) pred) specs i };
 
-          assert { final_match (matched_by (!set at Foo) pred) specs = final_match (matched_by !set pred) specs
-            by witness (is_final_match (matched_by (!set at Foo) pred) specs) = witness (is_final_match (matched_by !set pred) specs)
-                  by (forall p q: int -> bool. (forall x. p x <-> q x) -> witness p = witness q)
-                     by forall p q: int -> bool. (forall x. p x <-> q x) -> p = q
+          assert { final_match (matched_by (!set at Loop) pred) specs = final_match (matched_by !set pred) specs
+             by forall p q: int -> bool. (forall x. p x <-> q x) -> p = q
           };
-          assert { condition (!set at Foo) (final_match (matched_by (!set at Foo) pred) specs) = condition (!set at Foo) (final_match (matched_by !set pred) specs) };
-          assert { condition (!set at Foo) (final_match (matched_by !set pred) specs) = Some () };
-          let ghost foo = final_match (matched_by (unmut !set) pred) specs in
-          assert { (exists i. 0 <= i < length specs /\ specs[i] = foo)
-            by 0 <= witness (is_final_match (matched_by !set pred) specs) < length specs
-            by (forall x. is_final_match (matched_by !set pred) specs x -> 0 <= x < length specs) /\
-               (exists x. is_final_match (matched_by !set pred) specs x)
-               by (exists x. 0 <= x < length specs /\ matched_by !set pred specs[x])
-          };
-          match any metavar 'a ensures { result = who foo } with
-          | All -> ()
-          | Only x -> ()
-          | Alias _ -> absurd
-          end;
-          assert { not exists x. who (final_match (matched_by !set pred) specs) = Alias x };
-          assert { condition (!set at Foo) foo = Some () };
-          assert { condition !set foo = Some () };
-          assert { condition !set (final_match (matched_by !set pred) specs) = Some () };
-          assert { forall j. 0 <= j < i -> let (id, specs) = table[j] in
-                        H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
+          assert { condition (!set at Loop) (final_match (matched_by !set pred) specs) = Some () };
         end
       else if is_none (find_item (cons all specs) pred (unmut !set)) then
         begin
           check { condition !set (final_match (matched_by !set pred) (cons all specs)) = None };
           check { contains (matched_by !set pred) (cons all specs) };
-          assert { contains (matched_by !set pred) specs
+          check { contains (matched_by !set pred) specs
             by
               (contains (matched_by !set pred) (cons all specs) ->
               not contains (matched_by !set pred) specs ->
@@ -253,9 +227,21 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool) (ghost lookup_table: fm
           };
           H.add id false !set;
           check { contains (matched_by !set pred) specs };
-          assume { condition !set (final_match (matched_by !set pred) (cons all specs)) = None };
-          assume { forall j. 0 <= j < i -> let (id, specs) = table[j] in
-                        H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
+          check { condition !set (final_match (matched_by !set pred) (cons all specs)) = None };
+          assert { forall j. 0 <= j < i -> let (id, specs) = table[j] in
+                     H.mem id !set -> H.find id !set -> condition !set (final_match (matched_by !set pred) specs) = Some ()
+                     by
+                     condition !set (final_match (matched_by !set pred) specs) = condition (!set at Loop) (final_match (matched_by !set pred) specs)
+                     /\
+                     (final_match (matched_by (!set at Loop) pred) specs = final_match (matched_by !set pred) specs
+                       by
+                         (exists i. matched_by (!set at Loop) pred specs[i])
+                         /\
+                         (exists i. matched_by !set pred specs[i])
+                         /\
+                         forall p q: int -> bool. (forall x. p x <-> q x) -> p = q
+                     )
+          };
         end;
      assert { H.mem id !set <-> contains (matched_by !set pred) specs };
      assert { H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () };
