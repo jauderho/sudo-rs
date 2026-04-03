@@ -146,12 +146,9 @@ type def 'a = (name, seq (spec () 'a))
 
 let predicate is_some (x: option 'a) = not is_none x
 
-function fst (xy: ('a, 'b)): 'a =
-  let (x,_) = xy in x
-
 (* Why3 translation of get_aliases *)
 
-let lemma help_aux (x: spec () 'a) (set: found_aliases) (pred: 'a -> bool) (specs: seq (spec () 'a))
+let lemma prepending_doesnt_change_match (x: spec () 'a) (set: found_aliases) (pred: 'a -> bool) (specs: seq (spec () 'a))
   requires { contains (matched_by set pred) specs }
   ensures { final_match (matched_by set pred) specs = final_match (matched_by set pred) (cons x specs) }
 = for j = 0 to length specs - 1 do
@@ -176,7 +173,10 @@ let lemma final_match_exists (pred: 'a -> bool) (a: seq 'a)
 
 let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
   (* make sure the keys are uniquely defined (this is actually subsumed by the ghost requirement below *)
-  requires { forall i j. 0 <= i < j < length table -> fst table[i] <> fst table[j] }
+  requires { forall i j. 0 <= i < j < length table ->
+               let (k1, _) = table[i] in
+               let (k2, _) = table[j] in
+               k1 <> k2 }
 
   (* make sure the table is topologically sorted *)
   requires { forall i j. 0 <= i <= j < length table ->
@@ -185,18 +185,21 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
                forall k. 0 <= k < length items -> who items[k] <> Alias key }
 
   (* the resulting table encodes the membership of an identifier in an alias and its status *)
-  ensures { forall i. 0 <= i < length table -> let (id, specs) = table[i] in
-              H.mem id result <-> contains (matched_by result pred) specs }
+  ensures { let matched = matched_by result pred in
+            forall i. 0 <= i < length table -> let (id, specs) = table[i] in
+              H.mem id result <-> contains matched specs }
 
-  ensures { forall i. 0 <= i < length table -> let (id, specs) = table[i] in
-              H.mem id result -> H.find id result <-> condition result (final_match (matched_by result pred) specs) = Some () }
+  ensures { let matched = matched_by result pred in
+            forall i. 0 <= i < length table -> let (id, specs) = table[i] in
+              H.mem id result -> H.find id result <-> condition result (final_match matched specs) = Some () }
 
 = let all = { inner=Allow All; info=() } in
 
   let set = ref (H.create ()) in
 
   for i = 0 to table.length - 1 do
-    invariant { forall j. i <= j < table.length -> not H.mem (fst table[j]) !set }
+    invariant { forall j. i <= j < table.length -> let (key, _) = table[j] in
+                  not H.mem key !set }
     invariant { forall j. 0 <= j < i -> let (id, specs) = table[j] in
                   H.mem id !set <-> contains (matched_by !set pred) specs }
     invariant { forall j. 0 <= j < i -> let (id, specs) = table[j] in
