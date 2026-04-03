@@ -178,17 +178,11 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
   (* make sure the keys are uniquely defined (this is actually subsumed by the ghost requirement below *)
   requires { forall i j. 0 <= i < j < length table -> fst table[i] <> fst table[j] }
 
-  requires { forall i. 0 <= i < length table ->
-               let (_, items) = table[i] in
-               forall k, key. 0 <= k < length items -> who items[k] <> Alias key }
-
-(*
   (* make sure the table is topologically sorted *)
   requires { forall i j. 0 <= i <= j < length table ->
                let (_, items) = table[i] in
                let (key, _) = table[j] in
-               forall k. 0 <= k < length items -> who items[i] <> Alias key }
-*)
+               forall k. 0 <= k < length items -> who items[k] <> Alias key }
 
   (* the resulting table encodes the membership of an identifier in an alias and its status *)
   ensures { forall i. 0 <= i < length table -> let (id, specs) = table[i] in
@@ -212,6 +206,8 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
       label Loop in
       if is_some (find_item specs pred (unmut !set)) then
         begin
+          assert { forall k. 0 <= k < length specs -> who specs[k] <> Alias id };
+
           H.add id true !set;
 
           assert { final_match (matched_by (!set at Loop) pred) specs = final_match (matched_by !set pred) specs
