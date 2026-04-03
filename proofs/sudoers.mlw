@@ -1,4 +1,4 @@
-module Sudoers
+module FindItem
 
 use int.Int
 use option.Option
@@ -9,10 +9,16 @@ use witness.Witness
 (* model for a hashmap *)
 type table 'id 'value
 
-val function contains_key (t: table 'id 'value) (key: 'id): bool
+function contains_key (t: table 'id 'value) (key: 'id): bool
 
-val function get (t: table 'id 'value) (key: 'id): 'value
+val contains_key (t: table 'id 'value) (key: 'id): bool
+  ensures { result = contains_key t key }
+
+function get (t: table 'id 'value) (key: 'id): 'value
+
+val get (t: table 'id 'value) (key: 'id): 'value
   requires { contains_key t key }
+  ensures { result = get t key }
 
 (* loose models for the types in sudoers::Ast *)
 
@@ -105,5 +111,156 @@ let find_item (items: seq (spec 'tag 'a)) (pred: 'a -> bool) (aliases: found_ali
     done;
 
   !result;
+
+end
+
+module AliasTable
+
+use int.Int
+use option.Option
+use ref.Ref
+use seq.Seq
+use fmap.Fmap
+use witness.Witness
+
+let function fmap_contains_key (t: fmap 'id 'v) (k: 'id): bool
+  = any bool ensures { result = Fmap.mem k t }
+
+let function fmap_get (t: fmap 'id 'v) (k: 'id): 'v
+  = any 'v ensures { result = Fmap.find k t }
+
+clone FindItem
+ with type table = fmap, function contains_key = fmap_contains_key, function get = fmap_get
+
+clone fmap.MapImp as H
+ with type key = FindItem.name
+
+type mut_found_aliases = H.t bool
+
+(* this is essentially a coercion *)
+let unmut (t: mut_found_aliases): found_aliases
+= any found_aliases ensures { result = t }
+
+(* Model of some AST types and Rust types *)
+type def 'a = (name, seq (spec () 'a))
+
+let predicate is_some (x: option 'a) = not is_none x
+
+function fst (xy: ('a, 'b)): 'a =
+  let (x,_) = xy in x
+
+(* Why3 translation of get_aliases *)
+
+let lemma help_aux (x: spec () 'a) (set: found_aliases) (pred: 'a -> bool) (specs: seq (spec () 'a))
+  requires { contains (matched_by set pred) specs }
+  ensures { final_match (matched_by set pred) specs = final_match (matched_by set pred) (cons x specs) }
+= for j = 0 to length specs - 1 do
+    invariant { exists i. j <= i < length specs /\ matched_by set pred specs[i] }
+    if matched_by set pred specs[j] && any bool ensures { result <-> forall k. j < k < length specs -> not matched_by set pred specs[k] } then
+      begin
+        assert { specs[j] = (cons x specs)[j+1] };
+        assert { final_match (matched_by set pred) specs = specs[j] };
+        let modded_specs = cons x specs in
+        assert { final_match (matched_by set pred) modded_specs = specs[j] };
+        break
+      end;
+   done
+
+let lemma final_match_exists (pred: 'a -> bool) (a: seq 'a)
+  requires { exists i. 0 <= i < length a /\ pred a[i] }
+  ensures { exists j. is_final_match pred a j }
+= for k = 0 to a.length - 1 do
+    invariant { exists i. k <= i < length a /\ pred a[i] }
+    if any bool ensures { result <-> forall j. k < j < length a -> not pred a[j] } then break
+  done
+
+let get_aliases (table: seq (def 'a)) (pred: 'a -> bool) (ghost lookup_table: fmap name (seq (spec () 'a))): found_aliases
+  (* make sure the keys are uniquely defined (this is actually subsumed by the ghost requirement below *)
+  requires { forall i j. 0 <= i < j < length table -> fst table[i] <> fst table[j] }
+
+  requires { forall i. 0 <= i < length table ->
+               let (_, items) = table[i] in
+               forall k, key. 0 <= k < length items -> who items[k] <> Alias key }
+(*
+  (* make sure the table is topologically sorted *)
+  requires { forall i j. 0 <= i <= j < length table ->
+               let (_, items) = table[i] in
+               let (key, _) = table[j] in
+               forall k. 0 <= k < length items -> who items[i] <> Alias key }
+*)
+
+  (* make sure the ghost lookup table gives the same info in a functional style *)
+  requires { forall i. 0 <= i < length table -> let (key, value) = table[i] in
+               mem key lookup_table /\ find key lookup_table = value }
+
+= let all = { inner=Allow All; info=() } in
+
+  let set = ref (H.create ()) in
+
+  for i = 0 to table.length - 1 do
+    invariant { forall j. i <= j < table.length -> not H.mem (fst table[j]) !set }
+    invariant { forall j. 0 <= j < i -> let (id, specs) = table[j] in
+                  H.mem id !set <-> contains (matched_by !set pred) specs }
+    invariant { forall j. 0 <= j < i -> let (id, specs) = table[j] in
+                  H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
+
+      let (id, specs) = table[i] in
+      label Foo in
+      if is_some (find_item specs pred (unmut !set)) then
+        begin
+          check { condition !set (final_match (matched_by !set pred) specs) = Some () };
+          check { contains (matched_by !set pred) specs };
+          H.add id true !set;
+          check { contains (matched_by !set pred) specs };
+          assert { forall k. 0 <= k < length specs -> matched_by !set pred specs[k] = matched_by (!set at Foo) pred specs[k] };
+          assert { forall i. is_final_match (matched_by !set pred) specs i <-> is_final_match (matched_by (!set at Foo) pred) specs i };
+
+          assert { final_match (matched_by (!set at Foo) pred) specs = final_match (matched_by !set pred) specs
+            by witness (is_final_match (matched_by (!set at Foo) pred) specs) = witness (is_final_match (matched_by !set pred) specs)
+                  by (forall p q: int -> bool. (forall x. p x <-> q x) -> witness p = witness q)
+                     by forall p q: int -> bool. (forall x. p x <-> q x) -> p = q
+          };
+          assert { condition (!set at Foo) (final_match (matched_by (!set at Foo) pred) specs) = condition (!set at Foo) (final_match (matched_by !set pred) specs) };
+          assert { condition (!set at Foo) (final_match (matched_by !set pred) specs) = Some () };
+          let ghost foo = final_match (matched_by (unmut !set) pred) specs in
+          assert { (exists i. 0 <= i < length specs /\ specs[i] = foo)
+            by 0 <= witness (is_final_match (matched_by !set pred) specs) < length specs
+            by (forall x. is_final_match (matched_by !set pred) specs x -> 0 <= x < length specs) /\
+               (exists x. is_final_match (matched_by !set pred) specs x)
+               by (exists x. 0 <= x < length specs /\ matched_by !set pred specs[x])
+          };
+          match any metavar 'a ensures { result = who foo } with
+          | All -> ()
+          | Only x -> ()
+          | Alias _ -> absurd
+          end;
+          assert { not exists x. who (final_match (matched_by !set pred) specs) = Alias x };
+          assert { condition (!set at Foo) foo = Some () };
+          assert { condition !set foo = Some () };
+          assert { condition !set (final_match (matched_by !set pred) specs) = Some () };
+          assert { forall j. 0 <= j < i -> let (id, specs) = table[j] in
+                        H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
+        end
+      else if is_none (find_item (cons all specs) pred (unmut !set)) then
+        begin
+          check { condition !set (final_match (matched_by !set pred) (cons all specs)) = None };
+          check { contains (matched_by !set pred) (cons all specs) };
+          assert { contains (matched_by !set pred) specs
+            by
+              (contains (matched_by !set pred) (cons all specs) ->
+              not contains (matched_by !set pred) specs ->
+              condition !set (final_match (matched_by !set pred) (cons all specs)) = Some ())
+          };
+          H.add id false !set;
+          check { contains (matched_by !set pred) specs };
+          assume { condition !set (final_match (matched_by !set pred) (cons all specs)) = None };
+          assume { forall j. 0 <= j < i -> let (id, specs) = table[j] in
+                        H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () }
+        end;
+     assert { H.mem id !set <-> contains (matched_by !set pred) specs };
+     assert { H.mem id !set -> H.find id !set <-> condition !set (final_match (matched_by !set pred) specs) = Some () };
+  done;
+
+  unmut !set
 
 end
