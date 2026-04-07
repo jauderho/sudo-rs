@@ -121,7 +121,6 @@ use option.Option
 use ref.Ref
 use seq.Seq
 use fmap.Fmap
-use witness.Witness
 
 let function fmap_contains_key (t: fmap 'id 'v) (k: 'id): bool
   = any bool ensures { result = Fmap.mem k t }
@@ -129,11 +128,11 @@ let function fmap_contains_key (t: fmap 'id 'v) (k: 'id): bool
 let function fmap_get (t: fmap 'id 'v) (k: 'id): 'v
   = any 'v ensures { result = Fmap.find k t }
 
-clone FindItem
+clone export FindItem
  with type table = fmap, function contains_key = fmap_contains_key, function get = fmap_get
 
 clone fmap.MapImp as H
- with type key = FindItem.name
+ with type key = name
 
 type mut_found_aliases = H.t bool
 
@@ -227,5 +226,107 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
   done;
 
   unmut !set
+
+end
+
+module CorrectnessProof
+
+use int.Int
+use option.Option
+use ref.Ref
+use seq.Seq
+
+use AliasTable
+
+let function seqmap (f: 'a -> 'b) (items: seq 'a): seq 'b
+  ensures { length result = length items }
+  ensures { forall i. 0 <= i < length result -> result[i] = f items[i] }
+= let result = ref empty in
+  for i = 0 to length items - 1 do
+    invariant { length !result = i }
+    invariant { forall j. 0 <= j < i -> (!result)[j] = f items[j] }
+    result := snoc !result (f items[i])
+  done;
+  !result
+
+(* now for the important proof: our alias expansion algorithm is the same as actual expansion; this function
+   is not present in the Rust code base *)
+
+let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred: 'a -> bool) (ghost aliases: found_aliases): seq (spec 'tag 'a)
+  (* require all aliases to be defined in the table *)
+  requires { forall i. 0 <= i < length items ->
+               forall key. who items[i] = Alias key ->
+                 exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
+
+  (* to prevent loops, let's limit this definition to 'flat' macro definitions *)
+  requires { forall i. 0 <= i < length table -> let (_, def) = table[i] in
+               forall j. 0 <= j < length def -> not exists key. who def[j] = Alias key }
+
+  (* the expansion does not have macro's left *)
+  ensures { forall i. 0 <= i < length result -> not exists key. who result[i] = Alias key }
+
+  (* the alias table encodes the membership of an identifier in an alias and its status;
+     i.e. it has been produced by get_aliases above *)
+  requires { let matched = matched_by aliases pred in
+             let condition = condition aliases in
+             forall i. 0 <= i < length table -> let (id, specs) = table[i] in
+               (H.mem id aliases <-> contains matched specs) /\
+               (H.mem id aliases -> H.find id aliases <-> condition (final_match matched specs) = Some ()) }
+
+  ensures {
+        let matched = matched_by aliases pred in
+        contains matched result = contains matched items
+  }
+
+= let function negated (qual: qualified (metavar 'a)): qualified (metavar 'a) =
+    match qual with
+    | Allow x -> Forbid x
+    | Forbid x -> Allow x
+    end
+  in
+
+  let function find_def (key: name): seq (spec () 'a)
+    requires { exists i. 0 <= i < length table /\ let (id, _) = table[i] in id = key }
+    ensures { exists i. 0 <= i < length table /\ (key, result) = table[i] }
+  = for i = 0 to length table - 1 do
+      invariant { forall j. 0 <= j < i -> let (id, _) = table[j] in id <> key }
+      let (id, def) = table[i] in
+      if any bool ensures { result <-> id = key } then return def
+    done;
+    absurd
+  in
+
+  let distribute tag = seqmap (fun spec -> { spec with info = tag }) in
+  let negate = seqmap (fun spec -> { spec with inner = negated spec.inner }) in
+
+  let expanded = ref empty in
+  for i = 0 to length items - 1 do
+    invariant { forall i. 0 <= i < length !expanded -> not exists key. who (!expanded)[i] = Alias key }
+    invariant {
+        let matched = matched_by aliases pred in
+        contains matched (!expanded) = contains matched items[0..i]
+    }
+
+    assert { forall x y, p: spec 'tag 'a -> bool. contains p x -> contains p (x++y) };
+
+    match items[i] with
+    | { inner = Allow(Alias key); info = tag } ->
+       let expansion = find_def key in
+       expanded := !expanded ++ distribute tag expansion;
+
+    | { inner = Forbid(Alias key); info = tag } ->
+       let expansion = negate (find_def key) in
+       expanded := !expanded ++ distribute tag expansion;
+
+       assert { forall x. who { inner = x; info = () } = who { inner = negated x; info = () } };
+       assert { matched_by aliases pred items[i] -> contains (matched_by aliases pred) (!expanded) };
+
+    | _other ->
+       expanded := snoc !expanded items[i];
+    end;
+    assert { items[0..i+1] = snoc items[0..i] items[i] };
+  done;
+  assert { items[0.. length items] = items };
+  !expanded
 
 end
