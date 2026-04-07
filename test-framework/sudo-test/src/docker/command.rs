@@ -228,7 +228,10 @@ impl TryFrom<process::Output> for Output {
 
         // detect Rust panics early: exit code 101 is the default panic exit code
         if output.status.code() == Some(101) || stderr.contains("panicked") {
-            panic!("program panicked with {}\nstdout:\n{stdout}\n\nstderr:\n{stderr}", output.status);
+            panic!(
+                "program panicked with {}\nstdout:\n{stdout}\n\nstderr:\n{stderr}",
+                output.status
+            );
         }
 
         Ok(Output {
