@@ -171,7 +171,7 @@ let lemma final_match_exists (pred: 'a -> bool) (a: seq 'a)
   done
 
 let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
-  (* make sure the keys are uniquely defined (this is actually subsumed by the ghost requirement below *)
+  (* make sure the keys are uniquely defined *)
   requires { forall i j. 0 <= i < j < length table ->
                let (k1, _) = table[i] in
                let (k2, _) = table[j] in
@@ -258,12 +258,15 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
                forall key. who items[i] = Alias key ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* to prevent loops, let's limit this definition to 'flat' macro definitions *)
-  requires { forall i. 0 <= i < length table -> let (_, def) = table[i] in
-               forall j. 0 <= j < length def -> not exists key. who def[j] = Alias key }
+  (* make sure the table is topologically sorted *)
+  requires { forall i j. 0 <= i <= j < length table ->
+               let (_, items) = table[i] in
+               let (key, _) = table[j] in
+               forall k. 0 <= k < length items -> who items[k] <> Alias key }
 
-  (* the expansion does not have macro's left *)
-  ensures { forall i. 0 <= i < length result -> not exists key. who result[i] = Alias key }
+  (* the expansion does not have macro's left that refer to the 'top tier'; we expand only once *)
+  ensures { forall i. 0 <= i < length result ->
+              forall key. who result[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
 
   (* the alias table encodes the membership of an identifier in an alias and its status;
      i.e. it has been produced by get_aliases above *)
@@ -305,7 +308,9 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
 
   let expanded = ref empty in
   for i = 0 to length items - 1 do
-    invariant { forall i. 0 <= i < length !expanded -> not exists key. who (!expanded)[i] = Alias key }
+    invariant { forall i. 0 <= i < length !expanded ->
+                  forall key. who (!expanded)[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
+
     invariant {
         let matched = matched_by aliases pred in
         let condition = condition aliases in
