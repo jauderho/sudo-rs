@@ -229,7 +229,7 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
 
 end
 
-module CorrectnessProof
+module Expansion
 
 use int.Int
 use option.Option
@@ -435,5 +435,47 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
     cur := expand_aliases !cur table[..maxrow] pred aliases;
   done;
   !cur
+
+end
+
+module Correctness
+
+use int.Int
+use option.Option
+use seq.Seq
+
+use FindItem
+use AliasTable
+use Expansion
+
+let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a -> bool)
+  (* make sure the keys are uniquely defined *)
+  requires { forall i j. 0 <= i < j < length table ->
+               let (k1, _) = table[i] in
+               let (k2, _) = table[j] in
+               k1 <> k2 }
+
+  (* require all aliases to be defined in the table *)
+  requires { forall key.
+               (exists i. 0 <= i < length items /\ who items[i] = Alias key) \/
+               (exists k i. 0 <= k < length table /\ let (_, items) = table[k] in
+                            0 <= i < length items /\ who items[i] = Alias key)
+               ->
+                 exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
+
+  (* make sure the table is topologically sorted *)
+  requires { forall i j. 0 <= i <= j < length table ->
+               let (_, items) = table[i] in
+               let (key, _) = table[j] in
+               forall k. 0 <= k < length items -> who items[k] <> Alias key }
+
+= let aliases = get_aliases table pred in
+
+  let expanded = expand_all_aliases items table (ghost pred) (ghost aliases) in
+
+  let a = find_item expanded pred (any found_aliases) in
+  let b = find_item items pred aliases in
+
+  assert { a = b }
 
 end
