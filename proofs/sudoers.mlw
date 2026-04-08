@@ -275,7 +275,11 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
 
   ensures {
         let matched = matched_by aliases pred in
-        contains matched result = contains matched items
+        let condition = condition aliases in
+        if contains matched result then
+          contains matched items /\ condition (final_match matched result) = condition (final_match matched items)
+        else
+          not contains matched items
   }
 
 = let function negated (qual: qualified (metavar 'a)): qualified (metavar 'a) =
@@ -305,8 +309,8 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
     invariant {
         let matched = matched_by aliases pred in
         let condition = condition aliases in
-        if contains matched (!expanded) then
-          contains matched items[0..i] /\ condition (final_match matched (!expanded)) = condition (final_match matched items[0..i])
+        if contains matched !expanded then
+          contains matched items[0..i] /\ condition (final_match matched !expanded) = condition (final_match matched items[0..i])
         else
           not contains matched items[0..i]
     }
@@ -319,59 +323,47 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
        let expansion = find_def key in
        expanded := !expanded ++ distribute tag expansion;
 
-          assert {
-            contains (matched_by aliases pred) expansion ->
-            let matched = matched_by aliases pred in
-            condition aliases (final_match matched (!expanded)) = condition aliases (final_match matched items[0..i+1])
-              by
-                (final_match matched !expanded).inner = (final_match (matched_by aliases pred) expansion).inner
-                /\
-                (final_match matched !expanded).info = tag
-                /\
-                items[i].inner = Allow(Alias key)
-                /\
-                items[i].info = tag
-                /\
-                (matched_by aliases pred items[i] && final_match matched items[0..i+1] = items[i] by items[0..i+1] = snoc items[0..i] items[i])
-                /\
-                (condition aliases items[i] = Some tag <-> H.find key aliases)
-                /\
-                (condition aliases items[i] = None <-> not H.find key aliases)
-                /\
-                (condition aliases (final_match (matched_by aliases pred) expansion) = None <-> not H.find key aliases)
-                /\
-                (condition aliases (final_match (matched_by aliases pred) expansion) = Some () <-> H.find key aliases)
-          };
+       assert {
+         let matched = matched_by aliases pred in
+         matched items[i] ->
+         condition aliases (final_match matched !expanded) = condition aliases (final_match matched items[0..i+1])
+           by final_match matched !expanded = { (final_match (matched_by aliases pred) expansion) with info = tag }
+           /\ (condition aliases (final_match (matched_by aliases pred) expansion) = Some () <-> H.find key aliases)
+           /\ (final_match matched items[0..i+1] = items[i] by items[0..i+1] = snoc items[0..i] items[i])
+       };
 
-          assert {
-            not contains (matched_by aliases pred) expansion ->
-            let matched = matched_by aliases pred in
-            contains (matched_by aliases pred) (!expanded) ->
-            condition aliases (final_match matched (!expanded)) = condition aliases (final_match matched items[0..i+1])
-              by
-                not matched_by aliases pred items[i]
-                &&
-                contains (matched_by aliases pred) (!expanded at Loop)
-                &&
-                (contains (matched_by aliases pred) items[0..i] &&
-                   contains (matched_by aliases pred) items[0..i+1] &&
-                   final_match matched items[0..i+1] = final_match matched items[0..i] by items[0..i+1] = snoc items[0..i] items[i])
-                &&
-                final_match matched (!expanded at Loop) = final_match matched (!expanded)
-                  by (forall i. 0 <= i < length !expanded -> matched (!expanded)[i] -> 0 <= i < length (!expanded at Loop))
-                  /\ (forall i. 0 <= i < length (!expanded at Loop) -> (!expanded)[i] = (!expanded at Loop)[i])
-          };
+       assert { forall i. 0 <= i < length (!expanded at Loop) -> (!expanded)[i] = (!expanded at Loop)[i] };
 
     | { inner = Forbid(Alias key); info = tag } ->
-       let expansion = negate (find_def key) in
+       let pre_expansion = find_def key in
+       let expansion = negate pre_expansion in
        expanded := !expanded ++ distribute tag expansion;
 
        assert { forall x. who { inner = x; info = () } = who { inner = negated x; info = () } };
-       assert { matched_by aliases pred items[i] -> contains (matched_by aliases pred) (!expanded) };
-       assume {
-        (* this is an oversimplification, but it helps establish the invariant *)
-        let matched = matched_by aliases pred in
-          (final_match matched (!expanded)) = (final_match matched items[0..i+1]) }
+       assert { matched_by aliases pred items[i] -> contains (matched_by aliases pred) !expanded };
+
+       assert {
+         let matched = matched_by aliases pred in
+         matched items[i] ->
+         condition aliases (final_match matched !expanded) = condition aliases (final_match matched items[0..i+1])
+           by final_match matched !expanded = { (final_match (matched_by aliases pred) expansion) with info = tag }
+           /\ ((condition aliases (final_match (matched_by aliases pred) expansion) = None
+                <-> condition aliases (final_match (matched_by aliases pred) pre_expansion) = Some ()
+                <-> H.find key aliases)
+               by contains (matched_by aliases pred) expansion /\
+                  contains (matched_by aliases pred) pre_expansion /\
+                  final_match (matched_by aliases pred) expansion = { inner = negated (final_match (matched_by aliases pred) pre_expansion).inner; info = () } /\
+                  (forall i, key. 0 <= i < length pre_expansion -> who expansion[i] <> Alias key /\ who pre_expansion[i] <> Alias key) /\
+                  (forall i. 0 <= i < length expansion -> matched_by aliases pred pre_expansion[i] <-> matched_by aliases pred expansion[i]) /\
+                  (forall i. 0 <= i < length pre_expansion -> matched_by aliases pred pre_expansion[i] ->
+                    (condition aliases expansion[i] = None <-> condition aliases pre_expansion[i] = Some ())
+                    by (condition aliases pre_expansion[i] = Some () <-> forall x: metavar 'a. pre_expansion[i].inner = Forbid x -> exists key. x = Alias key) 
+                    )
+           )
+           /\ (final_match matched items[0..i+1] = items[i] by items[0..i+1] = snoc items[0..i] items[i])
+       };
+
+       assert { forall i. 0 <= i < length (!expanded at Loop) -> (!expanded)[i] = (!expanded at Loop)[i] };
 
     | _other ->
        expanded := snoc !expanded items[i];
