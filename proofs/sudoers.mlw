@@ -269,6 +269,10 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
               (exists k j. 0 <= k < length table /\ let (_, def) = table[k] in 0 <= j < length def /\ who result[i] = who def[j]) \/
               (exists j. 0 <= j < length items /\ who result[i] = who items[j]) }
 
+  (* no aliases will remain that refer to the last row in the table *)
+  ensures { forall i. 0 <= i < length result ->
+              forall key. who result[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
+
   (* the alias table encodes the membership of an identifier in an alias and its status;
      i.e. it has been produced by get_aliases above *)
   requires { let matched = matched_by aliases pred in
@@ -309,10 +313,12 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
 
   let expanded = ref empty in
   for i = 0 to length items - 1 do
-    (* this invariant expresses a limited 'provenance' of the resulting list; we only care about Alias-provenance, but this is easier to reason about *)
     invariant { forall i. 0 <= i < length !expanded ->
                     (exists k j. 0 <= k < length table /\ let (_, def) = table[k] in 0 <= j < length def /\ who (!expanded)[i] = who def[j]) \/
                     (exists j. 0 <= j < length items /\ who (!expanded)[i] = who items[j]) }
+
+    invariant { forall i. 0 <= i < length !expanded ->
+                  forall key. who (!expanded)[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
 
     invariant {
         let matched = matched_by aliases pred in
@@ -396,8 +402,8 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
                (H.mem id aliases <-> contains matched specs) /\
                (H.mem id aliases -> H.find id aliases <-> condition (final_match matched specs) = Some ()) }
 
-  (* ther result  does not have macro's left that *)
-  ensures { not exists i, key. 0 <= i < length result /\ who result[i] = Alias key}
+  (* the result is fully expanded *)
+  ensures { not exists i, key. 0 <= i < length result /\ who result[i] = Alias key }
 
   (* the primary result *)
   ensures {
@@ -410,7 +416,7 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
   }
 
 = let cur = ref items in
-  while any bool ensures { result <-> exists i, key. 0 <= i < length !cur /\ who (!cur)[i] = Alias key } do
+  for maxrow = table.length downto 1 do
     invariant {
         let matched = matched_by aliases pred in
         let condition = condition aliases in
@@ -422,9 +428,11 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
 
     invariant { forall i. 0 <= i < length !cur ->
                   forall key. who (!cur)[i] = Alias key ->
-                    exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
+                    exists j. 0 <= j < maxrow /\ let (id, _) = table[j] in id = key }
 
-    cur := expand_aliases !cur table pred aliases
+    assert { forall j. 0 <= j < maxrow -> table[..maxrow][j] = table[j] };
+
+    cur := expand_aliases !cur table[..maxrow] pred aliases;
   done;
   !cur
 
