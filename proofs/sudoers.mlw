@@ -9,16 +9,10 @@ use witness.Witness
 (* model for a hashmap *)
 type table 'id 'value
 
-function contains_key (t: table 'id 'value) (key: 'id): bool
+val function contains_key (t: table 'id 'value) (key: 'id): bool
 
-val contains_key (t: table 'id 'value) (key: 'id): bool
-  ensures { result = contains_key t key }
-
-function get (t: table 'id 'value) (key: 'id): 'value
-
-val get (t: table 'id 'value) (key: 'id): 'value
+val function get (t: table 'id 'value) (key: 'id): 'value
   requires { contains_key t key }
-  ensures { result = get t key }
 
 (* loose models for the types in sudoers::Ast *)
 
@@ -129,7 +123,7 @@ let function fmap_get (t: fmap 'id 'v) (k: 'id): 'v
   = any 'v ensures { result = Fmap.find k t }
 
 clone export FindItem
- with type table = fmap, function contains_key = fmap_contains_key, function get = fmap_get
+ with type table = fmap, val contains_key = fmap_contains_key, val get = fmap_get
 
 clone fmap.MapImp as H
  with type key = name
@@ -152,7 +146,7 @@ let lemma prepending_doesnt_change_match (x: spec () 'a) (set: found_aliases) (p
   ensures { final_match (matched_by set pred) specs = final_match (matched_by set pred) (cons x specs) }
 = for j = 0 to length specs - 1 do
     invariant { exists i. j <= i < length specs /\ matched_by set pred specs[i] }
-    if matched_by set pred specs[j] && any bool ensures { result <-> forall k. j < k < length specs -> not matched_by set pred specs[k] } then
+    if matched_by set pred specs[j] && pure { forall k. j < k < length specs -> not matched_by set pred specs[k] } then
       begin
         assert { specs[j] = (cons x specs)[j+1] };
         assert { final_match (matched_by set pred) specs = specs[j] };
@@ -167,7 +161,7 @@ let lemma final_match_exists (pred: 'a -> bool) (a: seq 'a)
   ensures { exists j. is_final_match pred a j }
 = for k = 0 to a.length - 1 do
     invariant { exists i. k <= i < length a /\ pred a[i] }
-    if any bool ensures { result <-> forall j. k < j < length a -> not pred a[j] } then break
+    if pure { forall j. k < j < length a -> not pred a[j] } then break
   done
 
 let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
