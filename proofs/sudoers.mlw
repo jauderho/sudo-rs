@@ -335,8 +335,7 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
        assert { forall i. 0 <= i < length (!expanded at Loop) -> (!expanded)[i] = (!expanded at Loop)[i] };
 
     | { inner = Forbid(Alias key); info = tag } ->
-       let pre_expansion = find_def key in
-       let expansion = negate pre_expansion in
+       let expansion = negate (find_def key) in
        expanded := !expanded ++ distribute tag expansion;
 
        assert { forall x. who { inner = x; info = () } = who { inner = negated x; info = () } };
@@ -347,19 +346,9 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
          matched items[i] ->
          condition aliases (final_match matched !expanded) = condition aliases (final_match matched items[0..i+1])
            by final_match matched !expanded = { (final_match (matched_by aliases pred) expansion) with info = tag }
-           /\ ((condition aliases (final_match (matched_by aliases pred) expansion) = None
-                <-> condition aliases (final_match (matched_by aliases pred) pre_expansion) = Some ()
-                <-> H.find key aliases)
-               by contains (matched_by aliases pred) expansion /\
-                  contains (matched_by aliases pred) pre_expansion /\
-                  final_match (matched_by aliases pred) expansion = { inner = negated (final_match (matched_by aliases pred) pre_expansion).inner; info = () } /\
-                  (forall i, key. 0 <= i < length pre_expansion -> who expansion[i] <> Alias key /\ who pre_expansion[i] <> Alias key) /\
-                  (forall i. 0 <= i < length expansion -> matched_by aliases pred pre_expansion[i] <-> matched_by aliases pred expansion[i]) /\
-                  (forall i. 0 <= i < length pre_expansion -> matched_by aliases pred pre_expansion[i] ->
-                    (condition aliases expansion[i] = None <-> condition aliases pre_expansion[i] = Some ())
-                    by (condition aliases pre_expansion[i] = Some () <-> forall x: metavar 'a. pre_expansion[i].inner = Forbid x -> exists key. x = Alias key) 
-                    )
-           )
+           /\ ((condition aliases (final_match (matched_by aliases pred) expansion) = None <-> H.find key aliases)
+               by forall i. 0 <= i < length (find_def key) -> matched_by aliases pred (find_def key)[i] ->
+                    condition aliases expansion[i] = None <-> condition aliases (find_def key)[i] = Some ())
            /\ (final_match matched items[0..i+1] = items[i] by items[0..i+1] = snoc items[0..i] items[i])
        };
 
