@@ -252,20 +252,10 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
                forall key. who items[i] = Alias key ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* make sure the table is topologically sorted *)
-  requires { forall i j. 0 <= i <= j < length table ->
-               let (_, items) = table[i] in
-               let (key, _) = table[j] in
-               forall k. 0 <= k < length items -> who items[k] <> Alias key }
-
   (* provenance: this function does not introduce any information outside that given to it *)
   ensures { forall i. 0 <= i < length result ->
-              (exists k j. 0 <= k < length table /\ let (_, def) = table[k] in 0 <= j < length def /\ who result[i] = who def[j]) \/
-              (exists j. 0 <= j < length items /\ who result[i] = who items[j]) }
-
-  (* no aliases will remain that refer to the last row in the table *)
-  ensures { forall i. 0 <= i < length result ->
-              forall key. who result[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
+              (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who result[i] = who def[j]) \/
+              (exists j. 0 <= j < length items /\ who result[i] = who items[j] /\ forall key. who result[i] <> Alias key) }
 
   (* the alias table encodes the membership of an identifier in an alias and its status;
      i.e. it has been produced by get_aliases above *)
@@ -308,11 +298,8 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
   let expanded = ref empty in
   for i = 0 to length items - 1 do
     invariant { forall i. 0 <= i < length !expanded ->
-                    (exists k j. 0 <= k < length table /\ let (_, def) = table[k] in 0 <= j < length def /\ who (!expanded)[i] = who def[j]) \/
-                    (exists j. 0 <= j < length items /\ who (!expanded)[i] = who items[j]) }
-
-    invariant { forall i. 0 <= i < length !expanded ->
-                  forall key. who (!expanded)[i] = Alias key -> length table > 0 -> let (id, _) = table[length table-1] in id <> key }
+                    (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who (!expanded)[i] = who def[j]) \/
+                    (exists j. 0 <= j < length items /\ who (!expanded)[i] = who items[j] /\ forall key. who (!expanded)[i] <> Alias key) }
 
     invariant {
         let matched = matched_by aliases pred in
@@ -376,7 +363,7 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
                forall key. who items[i] = Alias key ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* make sure the table is topologically sorted *)
+  (* require the table is topologically sorted; otherwise a full expansion is impossible *)
   requires { forall i j. 0 <= i <= j < length table ->
                let (_, items) = table[i] in
                let (key, _) = table[j] in
