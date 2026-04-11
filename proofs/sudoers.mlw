@@ -223,6 +223,33 @@ let get_aliases (table: seq (def 'a)) (pred: 'a -> bool): found_aliases
 
 end
 
+module WeakPermut
+
+use seq.Seq
+use int.Int
+use ref.Ref
+
+predicate weak_permut_all (x y: seq 'a)
+  = length x = length y /\
+    (forall i. 0 <= i < length x -> exists j. 0 <= j < length y /\ x[i] = y[j])
+
+let lemma permut_commutes (tab1 tab2: seq 'a)
+  requires { weak_permut_all tab1 tab2 }
+  requires { forall i j. 0 <= i < j < length tab1 -> tab1[i] <> tab1[j] }
+  ensures { weak_permut_all tab2 tab1 }
+  ensures { forall i j. 0 <= i < j < length tab2 -> tab2[i] <> tab2[j] }
+= let tab = ref tab2 in
+  for i = 0 to length tab2 - 1 do
+    invariant { weak_permut_all tab1 !tab}
+    invariant { forall i. 0 <= i < length tab2 -> exists j. 0 <= j < length !tab /\ tab2[i] = (!tab)[j] }
+    invariant { (exists i j. 0 <= i < j < length tab2 /\ tab2[i] = tab2[j]) -> exists i j. 0 <= i < j < length !tab /\ (!tab)[i] = (!tab)[j] }
+    invariant { forall j. 0 <= j < i -> (!tab)[j] = tab1[j] }
+    let j = any int ensures { i <= result < length tab1 /\ tab1[i] = (!tab)[result] } in
+    tab := (!tab)[i <- !(tab)[j]][j <- (!tab)[i]];
+  done
+
+end
+
 module Expansion
 
 use int.Int
@@ -361,10 +388,7 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
   assert { items[0.. length items] = items };
   !expanded
 
-predicate weak_permut_all (x y: seq 'a)
-  = length x = length y /\
-    (forall i. 0 <= i < length x -> exists j. 0 <= j < length y /\ x[i] = y[j]) /\
-    (forall i. 0 <= i < length y -> exists j. 0 <= j < length x /\ x[j] = y[i])
+use WeakPermut
 
 let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred: 'a -> bool) (ghost aliases: found_aliases) (ghost sorted_table: seq (def 'a)): seq (spec 'tag 'a)
   (* make sure the keys are uniquely defined *)
@@ -438,27 +462,12 @@ module Correctness
 
 use int.Int
 use option.Option
-use ref.Ref
 use seq.Seq
 
 use FindItem
 use AliasTable
 use Expansion
-
-let lemma permut_preserves_uniqueness (tab1 tab2: seq 'a) (i j: int)
-  requires { weak_permut_all tab1 tab2 }
-  requires { 0 <= i < j < length tab1 }
-  requires { tab1[i] = tab1[j] }
-  requires { forall i j. 0 <= i < j < length tab2 -> tab2[i] <> tab2[j] }
-  ensures { false }
-= let tab = ref tab1 in
-  for i = 0 to length tab1 - 1 do
-    invariant { weak_permut_all !tab tab2 }
-    invariant { exists i j. 0 <= i < j < length !tab /\ (!tab)[i] = (!tab)[j] }
-    invariant { forall j. 0 <= j < i -> (!tab)[j] = tab2[j] }
-    let j = any int ensures { i <= result < length tab2 /\ tab2[i] = (!tab)[result] } in
-    tab := (!tab)[i <- !(tab)[j]][j <- (!tab)[i]];
-  done
+use WeakPermut
 
 let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a -> bool) (sorted_table: seq (def 'a))
   (* make sure the keys are uniquely defined *)
@@ -476,7 +485,7 @@ let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
   (* make sure the table can be topologically sorted *)
-  requires { weak_permut_all sorted_table table }
+  requires { weak_permut_all table sorted_table }
 
   requires { forall i j. 0 <= i <= j < length sorted_table ->
                let (_, items) = sorted_table[i] in
