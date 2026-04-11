@@ -361,7 +361,12 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
   assert { items[0.. length items] = items };
   !expanded
 
-let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred: 'a -> bool) (ghost aliases: found_aliases): seq (spec 'tag 'a)
+predicate weak_permut_all (x y: seq 'a)
+  = length x = length y /\
+    (forall i. 0 <= i < length x -> exists j. 0 <= j < length y /\ x[i] = y[j]) /\
+    (forall i. 0 <= i < length y -> exists j. 0 <= j < length x /\ x[j] = y[i])
+
+let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred: 'a -> bool) (ghost aliases: found_aliases) (ghost sorted_table: seq (def 'a)): seq (spec 'tag 'a)
   (* make sure the keys are uniquely defined *)
   requires { forall i j. 0 <= i < j < length table ->
                let (k1, _) = table[i] in
@@ -373,17 +378,19 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
                forall key. who items[i] = Alias key ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* require the table is topologically sorted; otherwise a full expansion is impossible *)
-  requires { forall i j. 0 <= i <= j < length table ->
-               let (_, items) = table[i] in
-               let (key, _) = table[j] in
-               forall k. 0 <= k < length items -> who items[k] <> Alias key }
-
   (* this function also requires that it is grounded *)
   requires { forall i. 0 <= i < length table ->
                let (_, items) = table[i] in
                forall k, key. 0 <= k < length items -> who items[k] = Alias key ->
                exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
+
+  (* require that the table can be topologically sorted; otherwise a full expansion is impossible *)
+  requires { forall i j. 0 <= i <= j < length sorted_table ->
+               let (_, items) = sorted_table[i] in
+               let (key, _) = sorted_table[j] in
+               forall k. 0 <= k < length items -> who items[k] <> Alias key }
+
+  requires { weak_permut_all table sorted_table }
 
   (* the alias table encodes the membership of an identifier in an alias and its status;
      i.e. it has been produced by get_aliases above *)
@@ -407,7 +414,7 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
   }
 
 = let cur = ref items in
-  for maxrow = table.length downto 1 do
+  for iter = 1 to table.length do
     invariant {
         let matched = matched_by aliases pred in
         let condition = condition aliases in
@@ -419,7 +426,7 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
 
     invariant { forall i. 0 <= i < length !cur ->
                   forall key. who (!cur)[i] = Alias key ->
-                    exists j. 0 <= j < maxrow /\ let (id, _) = table[j] in id = key }
+                    exists j. 0 <= j <= length table - iter /\ let (id, _) = sorted_table[j] in id = key }
 
     cur := expand_aliases !cur table pred aliases;
   done;
@@ -431,13 +438,29 @@ module Correctness
 
 use int.Int
 use option.Option
+use ref.Ref
 use seq.Seq
 
 use FindItem
 use AliasTable
 use Expansion
 
-let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a -> bool)
+let lemma permut_preserves_uniqueness (tab1 tab2: seq 'a) (i j: int)
+  requires { weak_permut_all tab1 tab2 }
+  requires { 0 <= i < j < length tab1 }
+  requires { tab1[i] = tab1[j] }
+  requires { forall i j. 0 <= i < j < length tab2 -> tab2[i] <> tab2[j] }
+  ensures { false }
+= let tab = ref tab1 in
+  for i = 0 to length tab1 - 1 do
+    invariant { weak_permut_all !tab tab2 }
+    invariant { exists i j. 0 <= i < j < length !tab /\ (!tab)[i] = (!tab)[j] }
+    invariant { forall j. 0 <= j < i -> (!tab)[j] = tab2[j] }
+    let j = any int ensures { i <= result < length tab2 /\ tab2[i] = (!tab)[result] } in
+    tab := (!tab)[i <- !(tab)[j]][j <- (!tab)[i]];
+  done
+
+let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a -> bool) (sorted_table: seq (def 'a))
   (* make sure the keys are uniquely defined *)
   requires { forall i j. 0 <= i < j < length table ->
                let (k1, _) = table[i] in
@@ -452,15 +475,17 @@ let demonstration (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (pred: 'a ->
                ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* make sure the table is topologically sorted *)
-  requires { forall i j. 0 <= i <= j < length table ->
-               let (_, items) = table[i] in
-               let (key, _) = table[j] in
+  (* make sure the table can be topologically sorted *)
+  requires { weak_permut_all sorted_table table }
+
+  requires { forall i j. 0 <= i <= j < length sorted_table ->
+               let (_, items) = sorted_table[i] in
+               let (key, _) = sorted_table[j] in
                forall k. 0 <= k < length items -> who items[k] <> Alias key }
 
-= let aliases = get_aliases table pred in
+= let aliases = get_aliases sorted_table pred in
 
-  let expanded = expand_all_aliases items table (ghost pred) (ghost aliases) in
+  let expanded = expand_all_aliases items table (ghost pred) (ghost aliases) (ghost sorted_table) in
 
   let a = find_item expanded pred (any found_aliases) in
   let b = find_item items pred aliases in
