@@ -252,10 +252,12 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
                forall key. who items[i] = Alias key ->
                  exists j. 0 <= j < length table /\ let (id, _) = table[j] in id = key }
 
-  (* provenance: this function does not introduce any information outside that given to it *)
+  (* provenance: this function does not introduce any information outside that given to it; and aliases appear from referenced table rows only *)
   ensures { forall i. 0 <= i < length result ->
-              (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who result[i] = who def[j]) \/
-              (exists j. 0 <= j < length items /\ who result[i] = who items[j] /\ forall key. who result[i] <> Alias key) }
+              (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who result[i] = who def[j] /\
+                 exists n. 0 <= n < length items /\ who items[n] = Alias id) \/
+              (exists j. 0 <= j < length items /\ who result[i] = who items[j] /\
+                 forall key. who result[i] <> Alias key) }
 
   (* the alias table encodes the membership of an identifier in an alias and its status;
      i.e. it has been produced by get_aliases above *)
@@ -298,8 +300,10 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
   let expanded = ref empty in
   for i = 0 to length items - 1 do
     invariant { forall i. 0 <= i < length !expanded ->
-                    (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who (!expanded)[i] = who def[j]) \/
-                    (exists j. 0 <= j < length items /\ who (!expanded)[i] = who items[j] /\ forall key. who (!expanded)[i] <> Alias key) }
+                    (exists k j. 0 <= k < length table /\ let (id, def) = table[k] in 0 <= j < length def /\ who (!expanded)[i] = who def[j] /\
+                      exists n. 0 <= n < length items /\ who items[n] = Alias id) \/
+                    (exists j. 0 <= j < length items /\ who (!expanded)[i] = who items[j] /\
+                      forall key. who (!expanded)[i] <> Alias key) }
 
     invariant {
         let matched = matched_by aliases pred in
@@ -358,6 +362,12 @@ let expand_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred
   !expanded
 
 let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost pred: 'a -> bool) (ghost aliases: found_aliases): seq (spec 'tag 'a)
+  (* make sure the keys are uniquely defined *)
+  requires { forall i j. 0 <= i < j < length table ->
+               let (k1, _) = table[i] in
+               let (k2, _) = table[j] in
+               k1 <> k2 }
+
   (* require all aliases to be defined in the table *)
   requires { forall i. 0 <= i < length items ->
                forall key. who items[i] = Alias key ->
@@ -411,9 +421,7 @@ let expand_all_aliases (items: seq (spec 'tag 'a)) (table: seq (def 'a)) (ghost 
                   forall key. who (!cur)[i] = Alias key ->
                     exists j. 0 <= j < maxrow /\ let (id, _) = table[j] in id = key }
 
-    assert { forall j. 0 <= j < maxrow -> table[..maxrow][j] = table[j] };
-
-    cur := expand_aliases !cur table[..maxrow] pred aliases;
+    cur := expand_aliases !cur table pred aliases;
   done;
   !cur
 
