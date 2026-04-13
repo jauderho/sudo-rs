@@ -109,16 +109,13 @@ fn sudo_process() -> Result<(), Error> {
             }
             SudoAction::Validate(options) => pipeline::run_validate(options),
             SudoAction::Run(options) => {
-                // special case for when no command is given
-                if options.positional_args.is_empty() && !options.shell && !options.login {
-                    eprintln_ignore_io_error!("{}", usage_msg);
-                    std::process::exit(1);
-                } else {
-                    #[cfg(feature = "dev")]
-                    unstable_warning();
+                #[cfg(feature = "dev")]
+                unstable_warning();
 
-                    pipeline::run(options)
-                }
+                // SudoAction::from_env() should already ensure this
+                assert!(!options.positional_args.is_empty() || options.shell || options.login);
+
+                pipeline::run(options)
             }
             SudoAction::List(options) => pipeline::run_list(options),
             SudoAction::Edit(options) => pipeline::run_edit(options),
