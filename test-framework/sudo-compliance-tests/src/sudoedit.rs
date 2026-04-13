@@ -6,6 +6,7 @@ use crate::{
     DEFAULT_EDITOR, GROUPNAME, PANIC_EXIT_CODE, Result, SUDOERS_ALL_ALL_NOPASSWD, USERNAME,
 };
 
+mod flag_help;
 mod limits;
 mod sudoers;
 
