@@ -21,6 +21,18 @@ fn does_not_panic_on_io_errors() -> Result<()> {
 }
 
 #[test]
+fn no_args_gives_help() -> Result<()> {
+    let env = Env("").build();
+
+    let output = Command::new("sudoedit").output(&env);
+
+    let output = output.stderr();
+    assert_contains!(output, "usage: sudoedit");
+
+    Ok(())
+}
+
+#[test]
 fn prints_on_stdout() -> Result<()> {
     let env = Env("").build();
 
