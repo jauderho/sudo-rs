@@ -599,7 +599,9 @@ The only supported use is \[cq]*\[cq] as the final argument to indicate
 .SS Including other files from within sudoers
 It is possible to include other sudoers files from within the sudoers
 file currently being parsed using the \f[I]\[at]include\f[R] and
-\f[I]\[at]includedir\f[R] directives.
+\f[I]\[at]includedir\f[R] directives; or the contents provided by an
+application over a unix domain socket using the \f[I]\[at]socket\f[R]
+directive.
 For compatibility with Todd Miller\[cq]s sudo versions prior to 1.9.1,
 \f[I]#include\f[R] and \f[I]#includedir\f[R] are also accepted.
 .PP
@@ -665,6 +667,24 @@ syntax error.
 It is still possible to run visudo with the \-f flag to edit the files
 directly, but this will not catch the redefinition of an alias that is
 also present in a different file.
+.PP
+When managing enterprise-wide sudoers rules, it is sometimes preferable
+to store them in a centralized repository. The \[at]socket directive can be
+used to include the contents provided by a server application over a unix
+domain socket. For example, providing:
+.IP
+.EX
+     \[at]socket /var/run/providers/sudoers.socket
+.EE
+.PP
+will make sudo open that socket, read the rules and close it, as if it
+was an included file. The rules must follow the same syntax used in the
+sudoers files. There is, however, one exception: when reading from a
+socket, the \[at]include, \[at]includedir and \[at]socket directives
+are not accepted.
+.PP
+Please note that the contents read from a socket are immutable from
+sudo's point of view and visudo will not be able to edit them.
 .SS Other special characters and reserved words
 The pound sign (`#') is used to indicate a comment (unless it is part of
 a #include directive or unless it occurs in the context of a user name

@@ -3,6 +3,7 @@
 mod pty;
 mod regression;
 mod su;
+mod sudoers;
 
 const USERNAME: &str = "ferris";
 

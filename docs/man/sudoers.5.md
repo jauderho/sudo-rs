@@ -323,7 +323,7 @@ Wildcards in command line arguments are not supported---using these in original 
 
 ## Including other files from within sudoers
 
-It is possible to include other sudoers files from within the sudoers file currently being parsed using the *@include* and *@includedir* directives.  For compatibility with Todd Miller's sudo versions prior to 1.9.1, *#include* and *#includedir* are also accepted.
+It is possible to include other sudoers files from within the sudoers file currently being parsed using the *@include* and *@includedir* directives; or the contents provided by an application over a unix domain socket using the *@socket* directive.  For compatibility with Todd Miller's sudo versions prior to 1.9.1, *#include* and *#includedir* are also accepted.
 
 An include file can be used, for example, to keep a site-wide sudoers file in addition to a local, per-machine file.  For the sake of this example the site-wide sudoers file will be /etc/sudoers and the per-machine one will be /etc/sudoers.local.  To include /etc/sudoers.local from within /etc/sudoers one would use the following line in /etc/sudoers:
 
@@ -342,6 +342,14 @@ The @includedir directive can be used to create a sudoers.d directory that the s
 sudo will suspend processing of the current file and read each file in /etc/sudoers.d, skipping file names that end in ‘~’ or contain a ‘.’ character to avoid causing problems with package manager or editor temporary/backup files.  Files are parsed in sorted lexical order.  That is, /etc/sudoers.d/01_first will be parsed before /etc/sudoers.d/10_second.  Be aware that because the sorting is lexical, not numeric, /etc/sudoers.d/1_whoops would be loaded after /etc/sudoers.d/10_second.  Using a consistent number of leading zeroes in the file names can be used to avoid such problems.  After parsing the files in the directory, control returns to the file that contained the @includedir directive.
 
 Note that unlike files included via @include, visudo will not edit the files in a @includedir directory unless one of them contains a syntax error.  It is still possible to run visudo with the -f flag to edit the files directly, but this will not catch the redefinition of an alias that is also present in a different file.
+
+When managing enterprise-wide sudoers rules, it is sometimes preferable to store them in a centralized repository. The @socket directive can be used to include the contents provided by a server application over a unix domain socket. For example, providing:
+
+         @socket /var/run/providers/sudoers.socket
+
+will make sudo open that socket, read the rules and close it, as if it was an included file. The rules must follow the same syntax used in the sudoers files. There is, however, one exception: when reading from a socket, the @include, @includedir and @socket directives are not accepted.
+
+Please note that the contents read from a socket are immutable from sudo's point of view and visudo will not be able to edit them.
 
 ## Other special characters and reserved words
 
