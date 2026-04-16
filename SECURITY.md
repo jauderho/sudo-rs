@@ -23,5 +23,11 @@ We prefer to receive reports in English. If necessary, we also understand Spanis
 ## Disclosure Policy
 Like original sudo, we adhere to the principle of [Coordinated Vulnerability Disclosure](https://certcc.github.io/CERT-Guide-to-CVD/tutorials/cvd_in_a_nutshell/).
 
+## Reporter Expectations
+
+Vulnerability reports are considered Contributions in the legal sense of the Apache 2.0 license. Our [Contributor Expectations](https://github.com/trifectatechfoundation/sudo-rs/?tab=contributing-ov-file#expectations-for-contributors) apply as well. 
+
+If we determine a submitted report to not constitute a security vulnerability, it will be disclosed on our issue tracker.
+
 # Security Advisories
 Security advisories will be published [on GitHub](https://github.com/trifectatechfoundation/sudo-rs/security/advisories) and possibly through other channels.
