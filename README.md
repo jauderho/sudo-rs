@@ -150,7 +150,9 @@ If you **don't** have Todd Miller's `sudo` installed, you also have to make sure
 Sudo-rs is written in Rust. The minimum required Rust version is 1.85. If your
 Linux distribution does not package that version (or a later one), you can always
 install the most recent version through [rustup]. You also need the C development
-files for PAM (`libpam0g-dev` on Debian, `pam-devel` on Fedora).
+files for PAM (`libpam0g-dev` on Debian, `pam-devel` on Fedora). If you want to
+install translated messages, you also need gettext tools for `msgfmt` (`gettext`
+on Debian and Ubuntu).
 
 On Ubuntu or Debian-based systems, use the following command to install the PAM development library:
 ```
@@ -195,6 +197,25 @@ cargo build --release --features apparmor
 ```
 
 This feature is disabled on our pre-supplied binaries.
+
+#### --features gettext
+
+sudo-rs has support for translated user-facing messages. To enable this feature,
+build sudo-rs with gettext support enabled:
+
+```
+cargo build --release --features gettext
+```
+
+You can install the translation files from `po/*.po` using:
+
+```
+sudo make install-mo
+```
+
+This uses `msgfmt` to compile each `<lang>.po` file to
+`/usr/share/locale/<lang>/LC_MESSAGES/sudo-rs.mo`. If needed, you can override
+the install location by setting `LOCALEDIR` when invoking `make`.
 
 [rustup]: https://rustup.rs/
 
