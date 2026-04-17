@@ -26,17 +26,21 @@ To avoid that and/or to get the latest version, you can use our prepackaged bina
 ### Ubuntu 25.10 (Questing Quokka)
 
 sudo-rs is installed and enabled by default; you can control which sudo version is being used by running
+
 ```sh
 update-alternatives --config sudo
 ```
+
 The sudo-rs package is based on v0.2.8 with additional bug fixes that will be part of v0.2.9.
 
 ### Arch Linux
 
 sudo-rs can be installed from the distribution repositories:
+
 ```sh
 pacman -S sudo-rs
 ```
+
 This will offer the functionality using the commands `sudo-rs`, `sudoedit-rs`, `visudo-rs` and `su-rs` to avoid conflicts.
 
 The sudo-rs package on Arch Linux is typically up-to-date.
@@ -44,18 +48,23 @@ The sudo-rs package on Arch Linux is typically up-to-date.
 ### Fedora
 
 On Fedora you can use:
+
 ```sh
 dnf install sudo-rs
 ```
+
 This will offer the functionality using the commands `sudo-rs`, `visudo-rs` and `su-rs` to avoid conflicts.
 
 The version packaged in Fedora is usually the latest.
 
 ### Debian
+
 If you are running Debian 13 (trixie) or later you can use:
+
 ```sh
 apt-get install sudo-rs
 ```
+
 This will offer the functionality using the commands `sudo-rs`, `visudo-rs`. If you want to invoke sudo-rs
 via the usual commands `sudo` and `visudo` instead, prepend `/usr/lib/cargo/bin` to your current `$PATH` variable.
 
@@ -68,16 +77,20 @@ Debian unstable (sid) may have a newer version.
 ### FreeBSD
 
 We are maintaining the FreeBSD port of sudo-rs ourselves, which is available in the ports tree. Sudo-rs is available in two flavours:
-```
+
+```sh
 pkg install sudo-rs
 ```
+
 To get sudo-rs using the commands `sudo`, `visudo` and `sudoedit`. This conflicts with the `security/sudo` package and so you cannot have both
 installed at the same time.
 
 Alternatively,
-```
+
+```sh
 pkg install sudo-rs-coexist
 ```
+
 Installs the commands as `sudo-rs`, `visudo-rs`' and `sudoedit-rs` and does not conflict with the `security/sudo` package.
 
 To run these commands, the `pkg` utility needs to be using the `2025Q4` quarterly version (or later) of the ports tree. To use the
@@ -96,6 +109,7 @@ This will replace the usual `sudo` and `sudoedit` commands.
 ### Alpine Linux
 
 On Alpine Linux, sudo-rs is in the *community* repository, and can be installed as:
+
 ```sh
 apk add sudo-rs
 ```
@@ -110,13 +124,17 @@ We currently only offer these for x86-64 Linux systems.
 
 We recommend installing sudo-rs and su-rs in your `/usr/local` hierarchy so it does not affect the integrity of the package
 manager of your Linux distribution. You can achieve this using the commands:
+
 ```sh
 sudo tar -C /usr/local -xvf sudo-0.2.13.tar.gz
 ```
+
 and for su-rs:
+
 ```sh
 sudo tar -C /usr/local -xvf su-0.2.13.tar.gz
 ```
+
 This will install sudo-rs and su-rs in `/usr/local/bin` using the usual commands `sudo`, `visudo`, `sudoedit` and `su`. Please double check
 that in your default `PATH`, the folders `/usr/local/bin` and `/usr/local/sbin` have priority over `/usr/bin` and `/usr/sbin`.
 
@@ -150,20 +168,25 @@ If you **don't** have Todd Miller's `sudo` installed, you also have to make sure
 Sudo-rs is written in Rust. The minimum required Rust version is 1.85. If your
 Linux distribution does not package that version (or a later one), you can always
 install the most recent version through [rustup]. You also need the C development
-files for PAM (`libpam0g-dev` on Debian, `pam-devel` on Fedora).
+files for PAM (`libpam0g-dev` on Debian, `pam-devel` on Fedora). If you want to
+install translated messages, you also need gettext tools for `msgfmt` (`gettext`
+on Debian and Ubuntu).
 
 On Ubuntu or Debian-based systems, use the following command to install the PAM development library:
-```
+
+```sh
 sudo apt-get install libpam0g-dev
 ```
 
 On Fedora, CentOS and other Red Hat-based systems, you can use the following command:
-```
+
+```sh
 sudo yum install pam-devel
 ```
 
 With dependencies installed, building sudo-rs is a simple matter of:
-```
+
+```sh
 cargo build --release
 ```
 
@@ -177,24 +200,48 @@ suggestions in the previous section.
 ### Feature flags
 
 #### --features pam-login
+
 By default, sudo-rs will use the PAM service name `sudo`. On Debian and Fedora
 systems, it is customary that the name `sudo-i` is used when the `-i / --login`
 command line option is used. To get this behaviour, enable the `pam-login`
 feature when building:
-```
+
+```sh
 cargo build --release --features pam-login
 ```
+
 This feature is enabled on our pre-supplied binaries.
 
 #### --features apparmor
+
 sudo-rs has support for selecting AppArmor profile on Linux distributions that
 support AppArmor such as Debian and Ubuntu. To enable this feature, build sudo-rs
 with apparmor support enabled:
-```
+
+```sh
 cargo build --release --features apparmor
 ```
 
 This feature is disabled on our pre-supplied binaries.
+
+#### --features gettext
+
+sudo-rs has support for translated user-facing messages. To enable this feature,
+build sudo-rs with gettext support enabled:
+
+```sh
+cargo build --release --features gettext
+```
+
+You can install the translation files from `po/*.po` using:
+
+```sh
+sudo make install-mo
+```
+
+This uses `msgfmt` to compile each `<lang>.po` file to
+`/usr/share/locale/<lang>/LC_MESSAGES/sudo-rs.mo`. If needed, you can override
+the install location by setting `LOCALEDIR` when invoking `make`.
 
 [rustup]: https://rustup.rs/
 
@@ -280,4 +327,4 @@ Sudo-rs is an independent implementation, but it incorporates documentation and 
 
 An independent security audit of sudo-rs was made possible by the [NLNet Foundation](https://nlnet.nl/), who also [sponsored](https://nlnet.nl/project/sudo-rs/) work on increased compatibility with the original sudo and the FreeBSD port.
 
-The sudo-rs project would not have existed without the support of its sponsors, a full overview is maintained at https://trifectatech.org/initiatives/privilege-boundary/
+The sudo-rs project would not have existed without the support of its sponsors, a full overview is maintained at <https://trifectatech.org/initiatives/privilege-boundary/>
