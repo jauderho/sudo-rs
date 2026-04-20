@@ -144,7 +144,7 @@ impl Parse for Comment {
     }
 }
 
-fn skip_trailing_whitespace(stream: &mut CharStream) -> Parsed<()> {
+pub(super) fn skip_trailing_whitespace(stream: &mut CharStream) -> Parsed<()> {
     TrailingWhitespace::parse(stream)?;
     make(())
 }
