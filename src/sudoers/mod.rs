@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(not(feature = "unstable-remote-sudoers"), allow(unused_imports))]
 
 //! Code that checks (and in the future: lists) permissions in the sudoers file
 
@@ -413,6 +414,7 @@ fn open_subsudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
     read_sudoers(source)
 }
 
+#[cfg(feature = "unstable-remote-sudoers")]
 fn open_remote_sudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
     let source = audit::secure_open_remote_sudoers(path)?;
     read_sudoers(source)
@@ -700,6 +702,7 @@ fn analyze(
     #[derive(Clone, Copy)]
     #[repr(u32)]
     enum IncludeState {
+        #[cfg(feature = "unstable-remote-sudoers")]
         Forbidden = HARDENED_ENUM_VALUE_0,
         Allowed(u8) = HARDENED_ENUM_VALUE_1,
     }
@@ -707,6 +710,10 @@ fn analyze(
     impl IncludeState {
         #[inline]
         fn inc(&mut self) -> &mut Self {
+            #[cfg_attr(
+                not(feature = "unstable-remote-sudoers"),
+                allow(irrefutable_let_patterns)
+            )]
             if let IncludeState::Allowed(x) = self {
                 *x += 1;
             }
@@ -716,6 +723,7 @@ fn analyze(
         #[inline]
         fn limit_reached(&self) -> bool {
             match self {
+                #[cfg(feature = "unstable-remote-sudoers")]
                 IncludeState::Forbidden => true,
                 IncludeState::Allowed(x) => *x >= INCLUDE_LIMIT,
             }
@@ -727,6 +735,7 @@ fn analyze(
     enum IncludeDirective {
         Include = HARDENED_ENUM_VALUE_0,
         IncludeDir = HARDENED_ENUM_VALUE_1,
+        #[cfg(feature = "unstable-remote-sudoers")]
         Remote = HARDENED_ENUM_VALUE_2,
     }
 
@@ -735,6 +744,7 @@ fn analyze(
             let s = match self {
                 IncludeDirective::Include => "@include",
                 IncludeDirective::IncludeDir => "@includedir",
+                #[cfg(feature = "unstable-remote-sudoers")]
                 IncludeDirective::Remote => "@socket",
             };
             write!(f, "{s}")
@@ -768,6 +778,7 @@ fn analyze(
                 IncludeState::Allowed(_) => {
                     format!("include file limit reached opening '{}'", path.display())
                 }
+                #[cfg(feature = "unstable-remote-sudoers")]
                 IncludeState::Forbidden => {
                     format!("{} forbidden at this stage", include_source)
                 }
@@ -779,6 +790,7 @@ fn analyze(
             });
         } else {
             let (res, next_state, kind) = match include_source {
+                #[cfg(feature = "unstable-remote-sudoers")]
                 IncludeDirective::Remote => (
                     open_remote_sudoers(path),
                     &mut IncludeState::Forbidden,
@@ -861,6 +873,7 @@ fn analyze(
                         IncludeDirective::Include,
                     ),
 
+                    #[cfg(feature = "unstable-remote-sudoers")]
                     Sudo::Remote(path, span) => {
                         let socket_path = Path::new(&path);
                         if socket_path.is_relative() {

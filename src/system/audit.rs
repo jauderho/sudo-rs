@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "unstable-remote-sudoers"), allow(unused_imports))]
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_int, c_uint};
 use std::fs::{self, DirBuilder, File, Metadata, OpenOptions};
@@ -139,6 +140,7 @@ pub fn secure_open_sudoers(path: impl AsRef<Path>, check_parent_dir: bool) -> io
     secure_open_impl(path.as_ref(), &mut open_options, check_parent_dir, false)
 }
 
+#[cfg(feature = "unstable-remote-sudoers")]
 pub fn secure_open_remote_sudoers(path: impl AsRef<Path>) -> io::Result<BufReader<UnixStream>> {
     secure_open_socket_impl(path.as_ref())
 }
@@ -242,6 +244,7 @@ fn secure_open_impl(
 
 // Open the socket at path, provided that it is "secure".
 // "Secure" means that it passes the `checks` function above.
+#[cfg(feature = "unstable-remote-sudoers")]
 fn secure_open_socket_impl(path: &Path) -> io::Result<BufReader<UnixStream>> {
     let meta = fs::metadata(path)?;
     checks(path, meta)?;
