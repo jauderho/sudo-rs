@@ -59,7 +59,7 @@ impl SignalAction {
 
 static PENDING_SIGNALS: [AtomicBool; 64] = [const { AtomicBool::new(false) }; 64];
 
-fn store_pending(signal: SignalNumber) {
+extern "C" fn store_pending(signal: SignalNumber) {
     PENDING_SIGNALS[signal as usize].store(true, Ordering::SeqCst);
 }
 
