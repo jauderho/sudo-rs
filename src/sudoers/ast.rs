@@ -158,6 +158,7 @@ pub enum Sudo {
     Decl(Directive) = HARDENED_ENUM_VALUE_1,
     Include(String, Span) = HARDENED_ENUM_VALUE_2,
     IncludeDir(String, Span) = HARDENED_ENUM_VALUE_3,
+    #[cfg(feature = "unstable-remote-sudoers")]
     Remote(String, Span) = HARDENED_ENUM_VALUE_4,
     LineComment = HARDENED_ENUM_VALUE_5,
 }
@@ -593,6 +594,7 @@ fn parse_include(stream: &mut CharStream) -> Parsed<Sudo> {
             let (path, span) = get_path(stream, key_pos)?;
             Sudo::IncludeDir(path, span)
         }
+        #[cfg(feature = "unstable-remote-sudoers")]
         Some(Username(key)) if key == "socket" => {
             let (path, span) = get_path(stream, key_pos)?;
             Sudo::Remote(path, span)

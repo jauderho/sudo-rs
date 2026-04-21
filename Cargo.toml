@@ -32,6 +32,9 @@ apparmor = []
 # whether to enable 'gettext' support for giving localized user-facing messages
 gettext = []
 
+# whether to enable the unstable '@socket' feature for fetching a remote sudoers
+unstable-remote-sudoers = []
+
 # enable detailed logging (use for development only) to /tmp
 # this will compromise the security of sudo-rs somewhat
 dev = []
