@@ -245,6 +245,17 @@ fn secure_open_impl(
 fn secure_open_socket_impl(path: &Path) -> io::Result<BufReader<UnixStream>> {
     let meta = fs::metadata(path)?;
     checks(path, meta)?;
+    if let Some(parent_dir) = path.parent() {
+        let parent_meta = std::fs::metadata(parent_dir)?;
+        checks(parent_dir, parent_meta)?;
+    } else {
+        let error = |msg| Error::new(ErrorKind::PermissionDenied, msg);
+
+        return Err(error(xlat!(
+            "{path} has no valid parent directory",
+            path = path.display()
+        )));
+    }
 
     let stream = UnixStream::connect(path)?;
     stream.shutdown(Shutdown::Write)?;

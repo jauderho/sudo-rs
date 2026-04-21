@@ -404,7 +404,7 @@ fn read_sudoers<R: io::Read>(mut reader: R) -> io::Result<Vec<basic_parser::Pars
 }
 
 fn open_sudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
-    let source = audit::secure_open_sudoers(path, false)?;
+    let source = audit::secure_open_sudoers(path, true)?;
     read_sudoers(source)
 }
 
