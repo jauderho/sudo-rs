@@ -204,32 +204,28 @@ fn secure_open_impl(
     create_parent_dirs: bool,
 ) -> io::Result<File> {
     let error = |msg| Error::new(ErrorKind::PermissionDenied, msg);
-    if true || create_parent_dirs {
-        if let Some(parent_dir) = path.parent() {
-            // if we should create parent dirs and it does not yet exist, create it
-            if create_parent_dirs && !parent_dir.exists() {
-                DirBuilder::new()
-                    .recursive(true)
-                    .mode(
-                        mode(Category::Owner, Op::Write)
-                            | mode(Category::Owner, Op::Read)
-                            | mode(Category::Owner, Op::Exec)
-                            | mode(Category::Group, Op::Exec)
-                            | mode(Category::World, Op::Exec),
-                    )
-                    .create(parent_dir)?;
-            }
-
-            if true {
-                let parent_meta = std::fs::metadata(parent_dir)?;
-                checks(parent_dir, parent_meta)?;
-            }
-        } else {
-            return Err(error(xlat!(
-                "{path} has no valid parent directory",
-                path = path.display()
-            )));
+    if let Some(parent_dir) = path.parent() {
+        // if we should create parent dirs and it does not yet exist, create it
+        if create_parent_dirs && !parent_dir.exists() {
+            DirBuilder::new()
+                .recursive(true)
+                .mode(
+                    mode(Category::Owner, Op::Write)
+                        | mode(Category::Owner, Op::Read)
+                        | mode(Category::Owner, Op::Exec)
+                        | mode(Category::Group, Op::Exec)
+                        | mode(Category::World, Op::Exec),
+                )
+                .create(parent_dir)?;
         }
+
+        let parent_meta = std::fs::metadata(parent_dir)?;
+        checks(parent_dir, parent_meta)?;
+    } else {
+        return Err(error(xlat!(
+            "{path} has no valid parent directory",
+            path = path.display()
+        )));
     }
 
     let file = open_options.open(path)?;
