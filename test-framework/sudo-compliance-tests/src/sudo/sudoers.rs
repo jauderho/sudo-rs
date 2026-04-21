@@ -150,6 +150,26 @@ fn cannot_sudo_if_sudoers_file_is_not_owned_by_root() {
 }
 
 #[test]
+fn cannot_sudo_if_sudoers_file_is_missing() {
+    let env = Env("").build();
+
+    Command::new("rm")
+        .arg(format!("{ETC_DIR}/sudoers"))
+        .output(&env)
+        .assert_success();
+
+    let output = Command::new("sudo").arg("true").output(&env);
+    output.assert_exit_code(1);
+
+    let diagnostic = if sudo_test::is_original_sudo() {
+        format!("sudo: unable to open {ETC_DIR}/sudoers: No such file or directory")
+    } else {
+        format!("sudo: sudoers file not found: {ETC_DIR}/sudoers")
+    };
+    assert_contains!(output.stderr(), diagnostic);
+}
+
+#[test]
 fn user_specifications_evaluated_bottom_to_top() {
     let env = Env(format!(
         r#"{USERNAME} ALL=(ALL:ALL) NOPASSWD: ALL
