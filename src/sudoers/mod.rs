@@ -405,12 +405,7 @@ fn read_sudoers<R: io::Read>(mut reader: R) -> io::Result<Vec<basic_parser::Pars
 }
 
 fn open_sudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
-    let source = audit::secure_open_sudoers(path, false)?;
-    read_sudoers(source)
-}
-
-fn open_subsudoers(path: &Path) -> io::Result<Vec<basic_parser::Parsed<Sudo>>> {
-    let source = audit::secure_open_sudoers(path, true)?;
+    let source = audit::secure_open_sudoers(path)?;
     read_sudoers(source)
 }
 
@@ -796,7 +791,7 @@ fn analyze(
                     &mut IncludeState::Forbidden,
                     "socket",
                 ),
-                _ => (open_subsudoers(path), include_state.inc(), "file"),
+                _ => (open_sudoers(path), include_state.inc(), "file"),
             };
 
             match res {
