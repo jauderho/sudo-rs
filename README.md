@@ -114,8 +114,7 @@ On Alpine Linux, sudo-rs is in the *community* repository, and can be installed 
 apk add sudo-rs
 ```
 
-This will install the `sudo` and `visudo` commands (but not `sudoedit` as a separate command name, nor does it replace `su`, which is still
-offered through BusyBox).
+This will install the `sudo`, `visudo` and `sudoedit` commands (but not replace `su`, which is still offered through BusyBox).
 
 ### Installing our pre-compiled x86-64 binaries
 
